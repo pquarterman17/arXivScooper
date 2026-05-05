@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read  # Digests are uploaded as artifacts only (no repo writes)
+  issues: write   # Failure handler opens/comments on digest-failure issues
 
 jobs:
   digest:
@@ -31,6 +32,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        id: validate-secrets
+        env:
+          SCQ_EMAIL_FROM: ${{ secrets.SCQ_EMAIL_FROM }}
+          SCQ_EMAIL_APP_PASSWORD: ${{ secrets.SCQ_EMAIL_APP_PASSWORD }}
+          SCQ_EMAIL_TO: ${{ secrets.SCQ_EMAIL_TO }}
+        run: |
+          missing=()
+          [ -z "$SCQ_EMAIL_FROM" ]        && missing+=("SCQ_EMAIL_FROM")
+          [ -z "$SCQ_EMAIL_APP_PASSWORD" ] && missing+=("SCQ_EMAIL_APP_PASSWORD")
+          [ -z "$SCQ_EMAIL_TO" ]          && missing+=("SCQ_EMAIL_TO")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "ERROR: the following repository secrets are missing or empty:"
+            for s in "${missing[@]}"; do echo "  - $s"; done
+            echo "Go to Settings → Secrets and variables → Actions to add them."
+            exit 1
+          fi
+          echo "All required secrets are present."
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -45,6 +65,7 @@ jobs:
         run: pip install .
 
       - name: Run arXiv digest
+        id: run-digest
         env:
           SCQ_EMAIL_FROM: ${{ secrets.SCQ_EMAIL_FROM }}
           SCQ_EMAIL_APP_PASSWORD: ${{ secrets.SCQ_EMAIL_APP_PASSWORD }}
@@ -59,7 +80,7 @@ jobs:
             DAYS=3
           fi
           echo "Looking back $DAYS day(s)"
-          python tools/arxiv_digest.py --days $DAYS --max-results 1000 --smart-weekend
+          python tools/arxiv_digest.py --days $DAYS --max-results 1000 --smart-weekend --require-email
 
       # Note: digests are no longer committed to the repo (2026-05-01).
       # They live as a 30-day workflow artifact (downloadable from the run
@@ -72,3 +93,72 @@ jobs:
           name: digest-${{ github.run_id }}
           path: digests/
           retention-days: 30
+
+      - name: Open or update failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VALIDATE_OUTCOME: ${{ steps.validate-secrets.outcome }}
+          DIGEST_OUTCOME: ${{ steps.run-digest.outcome }}
+        run: |
+          # Ensure the digest-failure label exists (idempotent)
+          gh label create "digest-failure" \
+            --description "Automated digest pipeline failure" \
+            --color "D93F0B" \
+            --repo "${{ github.repository }}" \
+            2>/dev/null || true
+
+          # Determine failure mode and compose title + body
+          if [ "$VALIDATE_OUTCOME" = "failure" ]; then
+            TITLE="Digest pipeline: missing secrets"
+            BODY="The daily arXiv digest workflow failed because repository secrets are missing.
+
+**Fix:** Go to Settings → Secrets → Actions and add:
+- \`SCQ_EMAIL_FROM\` — Gmail sender address
+- \`SCQ_EMAIL_APP_PASSWORD\` — Gmail App Password
+- \`SCQ_EMAIL_TO\` — recipient address
+
+This usually happens after a repo recreate (filter-repo, transfer, etc).
+
+Run ID: ${RUN_URL}"
+          elif [ "$DIGEST_OUTCOME" = "failure" ]; then
+            TITLE="Digest pipeline: email delivery failed"
+            BODY="The daily digest fetched papers successfully but email delivery failed.
+
+**Possible causes:**
+- Gmail App Password expired or revoked → regenerate at https://myaccount.google.com/apppasswords
+- Gmail account security event (new device, suspicious activity) → check account alerts
+- Temporary SMTP outage → re-run the workflow manually
+
+Run ID: ${RUN_URL}"
+          else
+            TITLE="Digest pipeline: unexpected failure"
+            BODY="The daily arXiv digest workflow failed at an unexpected step.
+
+Check the run log for details.
+
+Run ID: ${RUN_URL}"
+          fi
+
+          # Search for an existing open issue with label digest-failure
+          EXISTING=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "digest-failure" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            echo "Commenting on existing issue #${EXISTING}"
+            gh issue comment "$EXISTING" \
+              --repo "${{ github.repository }}" \
+              --body "${BODY}"
+          else
+            echo "Creating new issue: ${TITLE}"
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "${TITLE}" \
+              --body "${BODY}" \
+              --label "digest-failure"
+          fi
