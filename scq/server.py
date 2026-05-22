@@ -293,6 +293,8 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
             self._proxy_crossref()
         elif self.path.startswith("/api/config/"):
             self._handle_config_get()
+        elif self._is_canonical_db_request():
+            self._serve_canonical_db()
         else:
             super().do_GET()
 
@@ -536,6 +538,36 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps({"error": message}).encode())
+
+    def _is_canonical_db_request(self):
+        # The browser fetches the DB at /data/<dbname>.db. Since 2026-05-01 the
+        # canonical DB has been able to live outside the repo (paths.toml), so
+        # the static-file handler can't reliably serve it. Resolve per-request
+        # so a paths.toml edit takes effect without restarting the server.
+        from scq.config.paths import paths as _paths_resolver
+
+        url_path = urllib.parse.urlparse(self.path).path
+        db_path = _paths_resolver(force_reload=True).db_path
+        return url_path == f"/data/{Path(db_path).name}"
+
+    def _serve_canonical_db(self):
+        from scq.config.paths import paths as _paths_resolver
+
+        db_path = Path(_paths_resolver(force_reload=True).db_path)
+        try:
+            data = db_path.read_bytes()
+        except FileNotFoundError:
+            self.send_error(404, f"DB not found at {db_path}")
+            return
+        except OSError as e:
+            self.send_error(500, f"Could not read DB: {e}")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.sqlite3")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
 
     # ── Config GET / POST endpoints (plan #11) ──
     #
