@@ -2,13 +2,13 @@
 papers/*.pdf
 
 # Per-paper figures and arXiv-fetch staging — both are junctions on
-# Windows pointing into OneDrive\arXivPoopScooper. Treat the entire
+# Windows pointing into OneDrive\arXivScooper. Treat the entire
 # trees as user-private data; they were removed from tracking in
 # `aba37e5` (2026-04-30).
 figures/
 inbox/
 
-# User research artifacts that live in OneDrive\arXivPoopScooper (per
+# User research artifacts that live in OneDrive\arXivScooper (per
 # the user_config/paths.toml override). Locally they may or may not
 # exist at these paths depending on each user's setup; either way
 # they're never committed.
@@ -27,7 +27,7 @@ weekly_digest.html
 # Canonical paper database — user-private. Bootstrap a fresh DB with
 # `scq init` (plan #2 / #13). Path is configurable via SCQ_DB_PATH or
 # data/user_config/paths.toml.
-data/arxiv_poop_scooper.db
+data/arxiv_scooper.db
 # Pre-rename names kept ignored during transition.
 data/scientific_litter_scoop.db
 data/scq_papers.db

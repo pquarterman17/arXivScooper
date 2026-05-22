@@ -15,7 +15,7 @@ Get your Overleaf project syncing with SCQ bibliography in 5 minutes.
 Open terminal and run:
 
 ```bash
-cd /path/to/arXivPoopScooper
+cd /path/to/arXivScooper
 python tools/overleaf_sync.py --setup https://git.overleaf.com/YOUR_PROJECT_ID
 ```
 

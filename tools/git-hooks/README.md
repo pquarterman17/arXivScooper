@@ -1,6 +1,6 @@
 # Git Hooks
 
-Shared git hooks for arXivPoopScooper. Lives in the repo (not in
+Shared git hooks for arXivScooper. Lives in the repo (not in
 `.git/hooks/`) so the hook script travels with checkouts. Each clone
 has to opt in once:
 

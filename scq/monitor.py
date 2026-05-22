@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 # GitHub repo that hosts the workflow.
-_REPO = "pquarterman17/arXivPoopScooper"
+_REPO = "pquarterman17/arXivScooper"
 _WORKFLOW = "arxiv_digest.yml"
 
 

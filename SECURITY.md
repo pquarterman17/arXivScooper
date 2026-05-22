@@ -11,7 +11,7 @@ If you find a security issue:
   to scrapers and would expose users running the tool locally before the
   patch lands.
 - **Use GitHub's private vulnerability reporting:**
-  <https://github.com/pquarterman17/arXivPoopScooper/security/advisories/new>
+  <https://github.com/pquarterman17/arXivScooper/security/advisories/new>
   (or click the "Security" tab on the repo page → "Report a vulnerability").
   Reports are private to the maintainer and the reporter; nothing is public
   until an advisory is published.
@@ -27,7 +27,7 @@ This tool is designed to be run **locally on a single user's machine**:
 
 - The HTTP server (`scq/server.py`, launched via `python -m scq serve`) binds to `127.0.0.1`. It
   is not designed to be exposed to the network.
-- The SQLite DB lives in `data/arxiv_poop_scooper.db` on the user's filesystem.
+- The SQLite DB lives in `data/arxiv_scooper.db` on the user's filesystem.
 - arXiv API access goes through a local proxy that adds a User-Agent;
   responses are XML parsed via `DOMParser`.
 - No authentication / authorization layer — single user.

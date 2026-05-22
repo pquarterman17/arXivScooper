@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>arXivPoopScooper — Paper Database</title>
+<title>arXivScooper — Paper Database</title>
 <link rel="stylesheet" href="src/styles/database.css">
 <link rel="stylesheet" href="src/styles/settings-v2.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
@@ -12,7 +12,7 @@
 
 <div class="header" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px">
   <div>
-    <h1>arXivPoopScooper</h1>
+    <h1>arXivScooper</h1>
     <p>Superconducting Circuits &amp; Qubits &mdash; <span id="paper-count"></span> papers</p>
   </div>
   <div class="notes-toolbar">
@@ -26,8 +26,8 @@
     <div class="toolbar-more">
       <button data-action="toggleMoreMenu" title="More actions">More &#9662;</button>
       <div class="toolbar-more-menu" id="more-menu">
-        <button data-action="menuSaveToDisk" title="POST the in-memory DB to data/arxiv_poop_scooper.db via scq.server" style="color:var(--green)">Save to disk</button>
-        <button data-action="menuDownloadDb" title="Download arxiv_poop_scooper.db (local backup)">Download .db</button>
+        <button data-action="menuSaveToDisk" title="POST the in-memory DB to data/arxiv_scooper.db via scq.server" style="color:var(--green)">Save to disk</button>
+        <button data-action="menuDownloadDb" title="Download arxiv_scooper.db (local backup)">Download .db</button>
         <button data-action="menuExportJson" title="Export state as JSON">Export JSON</button>
         <button data-action="menuImportDb" title="Restore from .db or .json">Import</button>
         <button data-action="menuMergeDb" title="Merge another .db" style="color:var(--accent)">Merge .db</button>

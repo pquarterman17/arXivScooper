@@ -27,13 +27,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Each entry: (literal_symbol, deprecation_note_for_failure_message)
 RETIRED_SYMBOLS = [
-    ("scq_data.js",              "retired 2026-04-28 (commit c3694d1); use data/arxiv_poop_scooper.db"),
+    ("scq_data.js",              "retired 2026-04-28 (commit c3694d1); use data/arxiv_scooper.db"),
     ("SCQ_DB_BASE64",            "retired 2026-04-28; the base64 bootstrap is gone, use sqlite3.connect(DB)"),
     ("/.scq_tmp.db",             "retired 2026-04-28; the canonical .db replaces the tmp roundtrip"),
     ("email_recipients.json",    "retired 2026-04-28 (commit 7089d55); use data/user_config/digest.json"),
-    ("scq_papers.db",            "retired 2026-05-01 (commit c9ed78b); renamed to arxiv_poop_scooper.db"),
-    ("scientific_litter_scoop.db", "retired 2026-05-03; renamed to arxiv_poop_scooper.db"),
+    ("scq_papers.db",            "retired 2026-05-01 (commit c9ed78b); renamed to arxiv_scooper.db"),
+    ("scientific_litter_scoop.db", "retired 2026-05-03; renamed to arxiv_scooper.db"),
     ("serve.py",                 "renamed 2026-05-03; moved to scq/server.py — invoke via `python -m scq serve`"),
+    ("arxiv_poop_scooper.db",    "retired 2026-05-21; renamed to arxiv_scooper.db"),
+    ("arXivPoopScooper",         "retired 2026-05-21; repo renamed to arXivScooper"),
 ]
 
 

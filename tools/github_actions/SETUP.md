@@ -12,10 +12,10 @@ like `scq-arxiv-digest`.
 
 ### 2. Push the project files
 
-Open a terminal in your `arXivPoopScooper` folder and run:
+Open a terminal in your `arXivScooper` folder and run:
 
 ```bash
-cd arXivPoopScooper
+cd arXivScooper
 git init
 git add tools/arxiv_digest.py tools/github_actions/requirements.txt
 git add digests/.gitkeep

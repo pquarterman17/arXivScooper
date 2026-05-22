@@ -10,10 +10,10 @@
 # All paths are resolved relative to the repo root unless absolute.
 
 # Canonical SQLite database file.
-db_path = "data/arxiv_poop_scooper.db"
+db_path = "data/arxiv_scooper.db"
 
 # Where downloaded paper PDFs live. On Windows this is a directory
-# junction → "OneDrive\Work and School Research\arXivPoopScooper\papers".
+# junction → "OneDrive\Work and School Research\arXivScooper\papers".
 papers_dir = "papers"
 
 # Where extracted figure JPEGs live (one subdir per arXiv ID).

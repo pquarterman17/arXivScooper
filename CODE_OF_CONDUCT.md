@@ -15,14 +15,14 @@ abide by the standards described there.
 
 To report a concern:
 
-- For most issues, [open a GitHub issue](https://github.com/pquarterman17/arXivPoopScooper/issues/new)
+- For most issues, [open a GitHub issue](https://github.com/pquarterman17/arXivScooper/issues/new)
   and describe what happened. Issues are public by default — keep
   identifying details out of the title and post-body if you want a more
   private channel first.
 - For sensitive or confidential reports (harassment, doxing, anything
   you want kept off the public timeline), use **GitHub's private
   vulnerability reporting** at
-  <https://github.com/pquarterman17/arXivPoopScooper/security/advisories/new>.
+  <https://github.com/pquarterman17/arXivScooper/security/advisories/new>.
   It's labelled "security advisory" but the form works for any
   privately-routed message to the maintainer; the conversation stays
   visible only to you and the maintainer until/unless explicitly

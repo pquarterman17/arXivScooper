@@ -11,11 +11,11 @@ After a paper is added via the add-paper pipeline, it has a truncated abstract a
 
 Find the project root in the sandbox by locating the canonical SQLite database:
 ```bash
-PROJECT_ROOT=$(find /sessions -name "arxiv_poop_scooper.db" -path "*/mnt/*/data/*" 2>/dev/null | head -1 | xargs dirname | xargs dirname)
+PROJECT_ROOT=$(find /sessions -name "arxiv_scooper.db" -path "*/mnt/*/data/*" 2>/dev/null | head -1 | xargs dirname | xargs dirname)
 ```
 
 The key file paths relative to `$PROJECT_ROOT`:
-- Database: `data/arxiv_poop_scooper.db`
+- Database: `data/arxiv_scooper.db`
 - PDFs: `papers/<arxiv_id>_<Author>_<ShortTitle>.pdf`
 - Figures: `figures/<arxiv_id>/`
 
@@ -27,8 +27,8 @@ The user might refer to a paper by arXiv ID, author name, or partial title.
 import sqlite3, json, os, glob
 
 # Find project root + DB dynamically
-matches = glob.glob("/sessions/*/mnt/*/data/arxiv_poop_scooper.db")
-DB = matches[0] if matches else "data/arxiv_poop_scooper.db"
+matches = glob.glob("/sessions/*/mnt/*/data/arxiv_scooper.db")
+DB = matches[0] if matches else "data/arxiv_scooper.db"
 PROJECT_ROOT = os.path.dirname(os.path.dirname(DB))
 
 conn = sqlite3.connect(DB)

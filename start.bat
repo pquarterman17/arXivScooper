@@ -1,6 +1,6 @@
 @echo off
-title arXivPoopScooper
-echo Starting arXivPoopScooper server...
+title arXivScooper
+echo Starting arXivScooper server...
 echo.
 cd /d "%~dp0"
 python -m scq serve %*

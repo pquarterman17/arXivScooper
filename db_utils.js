@@ -15,10 +15,10 @@
  */
 
 const SCQ = (function () {
-  // Canonical DB location, served by serve.py from data/arxiv_poop_scooper.db.
+  // Canonical DB location, served by serve.py from data/arxiv_scooper.db.
   // The legacy base64 bootstrap (scq_data.js) was retired — the page must
   // be served over HTTP (file:// no longer supported).
-  const DB_FILE = "data/arxiv_poop_scooper.db";
+  const DB_FILE = "data/arxiv_scooper.db";
   let db = null;
   let SQL = null;
   let dirty = false;
@@ -31,7 +31,7 @@ const SCQ = (function () {
       locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${f}`
     });
     // Load order:
-    //   1. HTTP fetch from data/arxiv_poop_scooper.db (canonical)
+    //   1. HTTP fetch from data/arxiv_scooper.db (canonical)
     //   2. localStorage cache (offline fallback)
     //   3. Empty database with schema (last resort)
     let loaded = false;

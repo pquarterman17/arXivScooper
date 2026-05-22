@@ -2,7 +2,7 @@
 """
 Initialize the SQLite database for the SCQ paper reference system.
 
-Creates arxiv_poop_scooper.db with:
+Creates arxiv_scooper.db with:
   - papers: core metadata (title, authors, summary, citations, etc.)
   - figures: per-paper figure references (file paths + captions)
   - notes: user notes with edit timestamps
@@ -37,7 +37,7 @@ try:
 
     DB_PATH = str(_scq_paths().db_path)
 except Exception:
-    DB_PATH = os.path.join(_REPO_ROOT, "data", "arxiv_poop_scooper.db")
+    DB_PATH = os.path.join(_REPO_ROOT, "data", "arxiv_scooper.db")
 
 SCHEMA = """
 -- Core paper metadata

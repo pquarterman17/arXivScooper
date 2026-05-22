@@ -1,4 +1,4 @@
--- 001_initial.sql — initial schema for arXivPoopScooper's paper database.
+-- 001_initial.sql — initial schema for arXivScooper's paper database.
 --
 -- Tables:
 --   papers         core paper metadata

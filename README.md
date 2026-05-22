@@ -1,4 +1,4 @@
-# arXivPoopScooper
+# arXivScooper
 
 Customizable arXiv scraper, which integrates into a local reference database.
 Interests can be customized, sends daily email of newly posted manuscripts
@@ -54,13 +54,13 @@ folder you can back up with `cp -r`.
 ### Install
 
 ```bash
-git clone https://github.com/pquarterman17/arXivPoopScooper.git
-cd arXivPoopScooper
+git clone https://github.com/pquarterman17/arXivScooper.git
+cd arXivScooper
 pip install -e .
 scq init             # create a fresh local database
 ```
 
-The database lives at `data/arxiv_poop_scooper.db` by default. Override with
+The database lives at `data/arxiv_scooper.db` by default. Override with
 `SCQ_DB_PATH` or `data/user_config/paths.toml`.
 
 ### Launch
@@ -95,9 +95,9 @@ That's it. Reload the database page to see the paper.
 ## Repository layout
 
 ```
-arXivPoopScooper/
+arXivScooper/
 ├── data/
-│   ├── arxiv_poop_scooper.db            # canonical SQLite database (gitignored)
+│   ├── arxiv_scooper.db            # canonical SQLite database (gitignored)
 │   ├── migrations/              # versioned schema (NNN_*.sql)
 │   └── user_config/             # user overrides (gitignored, .example committed)
 ├── src/                         # frontend ES modules (no build step)
@@ -119,7 +119,7 @@ arXivPoopScooper/
 ```
 
 For deeper detail, start with [`docs/architecture.md`](docs/architecture.md). The
-[GitHub wiki](https://github.com/pquarterman17/arXivPoopScooper/wiki) has
+[GitHub wiki](https://github.com/pquarterman17/arXivScooper/wiki) has
 project-level guidance for new contributors.
 
 ---

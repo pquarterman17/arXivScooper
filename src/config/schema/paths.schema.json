@@ -9,7 +9,7 @@
     "$schema": { "type": "string" },
     "db_path": {
       "type": "string",
-      "description": "Absolute path to the SQLite database file. Defaults to `data/arxiv_poop_scooper.db` under the repo root."
+      "description": "Absolute path to the SQLite database file. Defaults to `data/arxiv_scooper.db` under the repo root."
     },
     "papers_dir": {
       "type": "string",

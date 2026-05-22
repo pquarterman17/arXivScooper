@@ -2,7 +2,7 @@
   "name": "arxiv-poop-scooper",
   "version": "0.1.0",
   "private": true,
-  "description": "Frontend modules for arXivPoopScooper — a scientific literature manager for SCQ (superconducting quantum computing) research. No build step — vanilla ES modules served by scq/server.py.",
+  "description": "Frontend modules for arXivScooper — a scientific literature manager for SCQ (superconducting quantum computing) research. No build step — vanilla ES modules served by scq/server.py.",
   "type": "module",
   "scripts": {
     "test": "vitest run",

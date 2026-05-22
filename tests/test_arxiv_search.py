@@ -115,7 +115,7 @@ def test_arxiv_get_sends_repo_url_user_agent():
 
     ua = captured["headers"].get("User-agent") or captured["headers"].get("User-Agent")
     assert ua is not None, f"No User-Agent header in request: {captured['headers']}"
-    assert "github.com/pquarterman17/arXivPoopScooper" in ua
+    assert "github.com/pquarterman17/arXivScooper" in ua
 
 
 def test_arxiv_get_retries_on_429_and_eventually_returns_payload():

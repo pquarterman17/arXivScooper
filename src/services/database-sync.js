@@ -1,7 +1,7 @@
 /**
  * Sync the in-memory sql.js DB back to disk via serve.py's
  * /api/save-db endpoint. POSTs the raw SQLite bytes; the server
- * does an atomic write to data/arxiv_poop_scooper.db (or wherever
+ * does an atomic write to data/arxiv_scooper.db (or wherever
  * scq.config.paths resolves db_path to).
  *
  * Pure logic — no DOM. UI wiring lives in src/ui/database/save-to-disk.js.

@@ -33,7 +33,7 @@ def _isolate_env(monkeypatch, tmp_path):
 def test_defaults_resolve_under_repo_root(tmp_path):
     p = paths(force_reload=True)
     assert p.repo_root == tmp_path.resolve()
-    assert p.db_path == (tmp_path / "data" / "arxiv_poop_scooper.db").resolve()
+    assert p.db_path == (tmp_path / "data" / "arxiv_scooper.db").resolve()
     assert p.papers_dir == (tmp_path / "papers").resolve()
     assert p.digests_dir == (tmp_path / "digests").resolve()
     assert p.references_bib_path == (tmp_path / "references.bib").resolve()
@@ -88,7 +88,7 @@ def test_malformed_toml_falls_back_to_defaults(tmp_path, capsys):
     (user_dir / "paths.toml").write_text("this is not valid TOML [[")
     p = paths(force_reload=True)
     # Defaults still apply
-    assert p.db_path == (tmp_path / "data" / "arxiv_poop_scooper.db").resolve()
+    assert p.db_path == (tmp_path / "data" / "arxiv_scooper.db").resolve()
     # And we logged a warning
     err = capsys.readouterr().err
     assert "paths.toml" in err.lower() or "scq.config.paths" in err.lower()

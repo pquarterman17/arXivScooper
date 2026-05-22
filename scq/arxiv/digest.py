@@ -222,7 +222,7 @@ def _write_github_step_summary(
         email_line = "Skipped (`--no-email` or secrets absent)"
 
     artifact_note = (
-        f"[Download artifact](https://github.com/pquarterman17/arXivPoopScooper/"
+        f"[Download artifact](https://github.com/pquarterman17/arXivScooper/"
         f"actions/runs/{artifact_run_id}) (30-day retention)"
         if artifact_run_id
         else "Artifact available on the Actions run page (30-day retention)"

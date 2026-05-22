@@ -7,11 +7,11 @@ is a no-op.
 Usage:
     from scq.db.migrations import apply_pending
     import sqlite3
-    conn = sqlite3.connect("data/arxiv_poop_scooper.db")
+    conn = sqlite3.connect("data/arxiv_scooper.db")
     apply_pending(conn)
 
 Or via CLI:
-    python -m scq.db.migrations data/arxiv_poop_scooper.db
+    python -m scq.db.migrations data/arxiv_scooper.db
 
 Migration files MUST be named "NNN_<description>.sql" where NNN is a
 zero-padded integer (001, 002, ...). The integer is the version. Files

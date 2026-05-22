@@ -38,7 +38,7 @@ def _get_db_conn() -> sqlite3.Connection | None:
 
         db_path = get_paths().db_path
     except Exception:  # noqa: BLE001
-        db_path = Path("data/arxiv_poop_scooper.db")
+        db_path = Path("data/arxiv_scooper.db")
 
     if not db_path.is_file():
         print(f"  [relevance] database not found at {db_path}", file=sys.stderr)

@@ -9,7 +9,7 @@ Until plan item #5 wires up `scq.config.paths` properly, this module
 implements path resolution directly:
 
   1. Environment variable `SCQ_DB_PATH` (absolute or repo-relative)
-  2. `data/arxiv_poop_scooper.db` under the repo root (default)
+  2. `data/arxiv_scooper.db` under the repo root (default)
 
 The repo root is detected by walking upward from this file until we find
 a directory containing both `data/` and `pyproject.toml`.
@@ -33,14 +33,14 @@ def repo_root() -> Path:
 
 
 def db_path() -> Path:
-    """Resolve the path to arxiv_poop_scooper.db."""
+    """Resolve the path to arxiv_scooper.db."""
     env = os.environ.get("SCQ_DB_PATH")
     if env:
         p = Path(env)
         if not p.is_absolute():
             p = repo_root() / p
         return p
-    return repo_root() / "data" / "arxiv_poop_scooper.db"
+    return repo_root() / "data" / "arxiv_scooper.db"
 
 
 def connect(*, ensure_migrations: bool = True) -> sqlite3.Connection:

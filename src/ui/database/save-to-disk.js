@@ -75,7 +75,7 @@ export function installClickToSave() {
     const el = document.getElementById(INDICATOR_ID);
     if (!el) return false;
     el.style.cursor = 'pointer';
-    el.title = (el.title || '') + '\n(click to save to data/arxiv_poop_scooper.db)';
+    el.title = (el.title || '') + '\n(click to save to data/arxiv_scooper.db)';
     el.addEventListener('click', async (ev) => {
       ev.preventDefault();
       try {

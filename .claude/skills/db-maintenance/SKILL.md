@@ -5,7 +5,7 @@ description: "Perform maintenance operations on the SCQ paper database — delet
 
 # Database Maintenance
 
-This skill covers all direct database operations not handled by add-paper (ingestion) or enrich-paper (summary/results). The database is the SQLite file at `data/arxiv_poop_scooper.db` (served directly via HTTP by `scq/server.py`, launched via `python -m scq serve`).
+This skill covers all direct database operations not handled by add-paper (ingestion) or enrich-paper (summary/results). The database is the SQLite file at `data/arxiv_scooper.db` (served directly via HTTP by `scq/server.py`, launched via `python -m scq serve`).
 
 ## Connecting to the Database
 
@@ -17,8 +17,8 @@ from datetime import datetime
 
 # Find the canonical .db dynamically. Works in the Cowork sandbox via the
 # /sessions glob; falls back to a relative path when running locally.
-matches = glob.glob("/sessions/*/mnt/*/data/arxiv_poop_scooper.db")
-DB = matches[0] if matches else "data/arxiv_poop_scooper.db"
+matches = glob.glob("/sessions/*/mnt/*/data/arxiv_scooper.db")
+DB = matches[0] if matches else "data/arxiv_scooper.db"
 PROJECT_ROOT = os.path.dirname(os.path.dirname(DB))
 
 def open_db():
@@ -128,5 +128,5 @@ print(f"Papers: {paper_count}, Tagged: {tagged}, Enriched: {enriched}, With note
 ## Important Reminders
 
 - Always call `conn.commit()` (or `save_db(conn)`) after changes — without commit, SQLite leaves the change in the rolled-back transaction and the next reader sees the old state.
-- `data/arxiv_poop_scooper.db` is the canonical data source — the running browser fetches it directly via HTTP and reads it with sql.js. There is no re-export step.
+- `data/arxiv_scooper.db` is the canonical data source — the running browser fetches it directly via HTTP and reads it with sql.js. There is no re-export step.
 - Confirm destructive operations (delete, bulk retag) with the user before executing.

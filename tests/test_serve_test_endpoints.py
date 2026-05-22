@@ -93,7 +93,7 @@ def _post(port, path, body=b""):
 
 def test_db_path_returns_ok_for_real_sqlite_file(running_server):
     port, root = running_server
-    db = root / "data" / "arxiv_poop_scooper.db"
+    db = root / "data" / "arxiv_scooper.db"
     db.parent.mkdir(parents=True, exist_ok=True)
     # Apply migrations so the DB has the `papers` table
     from scq.db.migrations import apply_pending
@@ -112,7 +112,7 @@ def test_db_path_returns_ok_for_real_sqlite_file(running_server):
     assert status == 200
     payload = json.loads(body)
     assert payload["ok"] is True, payload
-    assert payload["path"].endswith("arxiv_poop_scooper.db")
+    assert payload["path"].endswith("arxiv_scooper.db")
     assert payload["size"] > 0
     assert payload["papers"] == 1
 
@@ -128,7 +128,7 @@ def test_db_path_returns_error_when_file_missing(running_server):
 
 def test_db_path_returns_error_for_non_sqlite_file(running_server):
     port, root = running_server
-    db = root / "data" / "arxiv_poop_scooper.db"
+    db = root / "data" / "arxiv_scooper.db"
     db.parent.mkdir(parents=True, exist_ok=True)
     db.write_bytes(b"not a sqlite file at all")
     status, body = _post(port, "/api/test/db-path")

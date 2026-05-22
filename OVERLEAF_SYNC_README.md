@@ -145,7 +145,7 @@ Configuration:
 
 Database:
   Total entries:   42
-  Bib file:        /path/to/arXivPoopScooper/references.bib
+  Bib file:        /path/to/arXivScooper/references.bib
 
 Sync History:
   Last sync:       2026-04-05T14:30:00.123456
@@ -268,7 +268,7 @@ Then manually run `python tools/overleaf_sync.py` when needed.
 ## File Structure
 
 ```
-arXivPoopScooper/
+arXivScooper/
 ├── tools/
 │   ├── overleaf_sync.py          # Main sync script
 │   └── process_paper.py           # (auto-calls overleaf_sync.py)

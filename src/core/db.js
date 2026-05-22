@@ -11,7 +11,7 @@
  * `init({ initSqlJs })` explicitly.
  *
  * Persistence model:
- *  - The canonical DB file is `data/arxiv_poop_scooper.db`, served by serve.py and
+ *  - The canonical DB file is `data/arxiv_scooper.db`, served by serve.py and
  *    rewritten by the Python tools in `scq/`.
  *  - In the browser the DB is loaded into memory via sql.js - writes here
  *    are cache-only (localStorage) until the Settings UI (plan item #11)
@@ -25,7 +25,7 @@
 
 import bus from './events.js';
 
-const DB_PATH = 'data/arxiv_poop_scooper.db';
+const DB_PATH = 'data/arxiv_scooper.db';
 const CACHE_KEY = 'scq-db-base64';
 const CACHE_LIMIT_BYTES = 4 * 1024 * 1024;
 const CACHE_DEBOUNCE_MS = 3000;
@@ -41,7 +41,7 @@ let _cacheTimer = null;
  *
  * @param {object} [opts]
  * @param {function} [opts.initSqlJs] - sql.js loader. Defaults to globalThis.initSqlJs.
- * @param {string}   [opts.dbPath]    - relative path to the .db file. Defaults to 'data/arxiv_poop_scooper.db'.
+ * @param {string}   [opts.dbPath]    - relative path to the .db file. Defaults to 'data/arxiv_scooper.db'.
  * @param {string}   [opts.wasmBaseUrl] - where sql.js can fetch the .wasm. Defaults to a CDN.
  * @param {function} [opts.fetch]     - fetch impl, defaults to globalThis.fetch.
  * @param {object}   [opts.storage]   - localStorage-shaped object for cache; default is globalThis.localStorage.

@@ -5,22 +5,22 @@ description: "Add a paper to the SCQ database from an arXiv ID. Use this skill w
 
 # Add Paper
 
-This skill runs the full pipeline to add an arXiv paper to the arXivPoopScooper database. It's a two-step process because the Cowork sandbox can't reach arxiv.org directly — Step 1 runs on the host machine via Desktop Commander, Step 2 runs in the sandbox.
+This skill runs the full pipeline to add an arXiv paper to the arXivScooper database. It's a two-step process because the Cowork sandbox can't reach arxiv.org directly — Step 1 runs on the host machine via Desktop Commander, Step 2 runs in the sandbox.
 
 ## Path Setup
 
 The project root in the sandbox is wherever the user's workspace folder is mounted. Find it with:
 ```bash
-# The mount point follows this pattern — look for the folder containing data/arxiv_poop_scooper.db
-find /sessions -name "arxiv_poop_scooper.db" -path "*/mnt/*/data/*" 2>/dev/null | head -1 | xargs dirname | xargs dirname
+# The mount point follows this pattern — look for the folder containing data/arxiv_scooper.db
+find /sessions -name "arxiv_scooper.db" -path "*/mnt/*/data/*" 2>/dev/null | head -1 | xargs dirname | xargs dirname
 ```
 Store the result as `PROJECT_ROOT` and use it throughout.
 
 On the host machine (for Desktop Commander), the project lives at:
-- **Windows:** `C:\Users\patri\OneDrive\Coding\git\arXivPoopScooper`
-- **macOS:** Check OneDrive or iCloud sync path — likely `~/OneDrive/Coding/git/arXivPoopScooper`
+- **Windows:** `C:\Users\patri\OneDrive\Coding\git\arXivScooper`
+- **macOS:** Check OneDrive or iCloud sync path — likely `~/OneDrive/Coding/git/arXivScooper`
 
-The `papers/`, `figures/`, and `inbox/` subdirectories are Windows directory junctions that point into `OneDrive\Work and School Research\arXivPoopScooper\`. From the code's perspective they behave like normal subfolders.
+The `papers/`, `figures/`, and `inbox/` subdirectories are Windows directory junctions that point into `OneDrive\Work and School Research\arXivScooper\`. From the code's perspective they behave like normal subfolders.
 
 ## Extracting the arXiv ID
 
@@ -43,7 +43,7 @@ Use `shell: "cmd"` with Desktop Commander — PowerShell swallows stdout.
 If `run_fetch.bat` doesn't exist yet, create it first:
 ```bat
 @echo off
-"C:\Program Files\nodejs\node.exe" "C:\Users\patri\OneDrive\Coding\git\arXivPoopScooper\tools\fetch_arxiv.js" %*
+"C:\Program Files\nodejs\node.exe" "C:\Users\patri\OneDrive\Coding\git\arXivScooper\tools\fetch_arxiv.js" %*
 ```
 
 ### macOS / Linux
@@ -66,8 +66,8 @@ This automatically:
 2. Extracts figures and captions from the PDF
 3. Generates BibTeX and plain-text citations
 4. Auto-tags based on arXiv categories + keyword matching
-5. Inserts everything into the SQLite database at `data/arxiv_poop_scooper.db`
-6. Appends to `references.bib` and `references.txt` (resolved through `paths.toml` — typically in `OneDrive/arXivPoopScooper/citations/`)
+5. Inserts everything into the SQLite database at `data/arxiv_scooper.db`
+6. Appends to `references.bib` and `references.txt` (resolved through `paths.toml` — typically in `OneDrive/arXivScooper/citations/`)
 
 If the user provided a note (e.g., "interesting T1 results"), pass it with `--note`.
 

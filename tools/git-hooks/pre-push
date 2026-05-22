@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-push quality gate for arXivPoopScooper.
+# Pre-push quality gate for arXivScooper.
 #
 # Runs vitest + pytest + a quick secret-scan against the commits that are
 # about to be pushed. Blocks the push if any check fails. Bypass with
@@ -8,7 +8,7 @@
 # Install:
 #     git config core.hooksPath tools/git-hooks
 #
-# Each arXivPoopScooper checkout has to opt in once — git won't honor
+# Each arXivScooper checkout has to opt in once — git won't honor
 # hooks under tools/ until you set core.hooksPath. Keeping the hook here
 # (not in .git/hooks/) means it travels with the repo.
 #

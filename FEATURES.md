@@ -1,4 +1,4 @@
-# arXivPoopScooper — Features & Roadmap
+# arXivScooper — Features & Roadmap
 
 A lightweight, browser-based literature management system for superconducting quantum computing (SCQ) research. Inspired by Mendeley circa 2017: powerful enough to be useful, simple enough to not get in the way.
 
@@ -11,20 +11,20 @@ Two HTML pages served via a lightweight local server (`scq/server.py`), backed b
 ### File Structure
 
 ```
-arXivPoopScooper/
+arXivScooper/
 ├── START.bat                Double-click to launch (Windows)
 ├── scq/server.py            Local server + arXiv API proxy (renamed from serve.py in plan #12)
 ├── paper_database.html      Main app (Library + Reading List + Cite tabs)
 ├── paper_scraper.html       Paper discovery (Search + Inbox + Quick Search tabs)
-├── data/arxiv_poop_scooper.db   SQLite database (canonical data source, served via HTTP)
+├── data/arxiv_scooper.db   SQLite database (canonical data source, served via HTTP)
 ├── db_utils.js              Shared sql.js utility layer (legacy; superseded by src/core/db.js)
 ├── scraper_config.js        Domain config (presets, tags, sources)
-├── papers/                  [junction] PDFs in arXivPoopScooper/papers/
-├── figures/                 [junction] Figures in arXivPoopScooper/figures/
-├── inbox/                   [junction] arXiv-fetch staging in arXivPoopScooper/inbox/
+├── papers/                  [junction] PDFs in arXivScooper/papers/
+├── figures/                 [junction] Figures in arXivScooper/figures/
+├── inbox/                   [junction] arXiv-fetch staging in arXivScooper/inbox/
 │
 │ // All user data — DB, citations, digests — lives external in
-│ // <OneDrive>/Work and School Research/arXivPoopScooper/, mapped
+│ // <OneDrive>/Work and School Research/arXivScooper/, mapped
 │ // via data/user_config/paths.toml. The repo only carries code.
 ├── src/                     Frontend ES modules (no build step)
 │   ├── core/                  db, store, events, config, search-config-bridge
@@ -132,7 +132,7 @@ arXivPoopScooper/
 
 ### State Durability
 
-- All state stored in SQLite database at `data/arxiv_poop_scooper.db` (served directly via HTTP and loaded into the browser by sql.js)
+- All state stored in SQLite database at `data/arxiv_scooper.db` (served directly via HTTP and loaded into the browser by sql.js)
 - **Save database** button downloads the `.db` file
 - **Export JSON** button downloads full state as JSON backup
 - **Import** button restores from `.db` or `.json` file
@@ -222,7 +222,7 @@ The primary workflow for adding papers from arXiv. Two-step process: fetch (host
 - Auto-tags from arXiv categories + keyword detection (18+ SCQ domain terms)
 - Inserts into SQLite: paper, figures, FTS index, read status, optional notes
 - Appends to `references.bib` and `references.txt` with duplicate detection
-- Writes directly to `data/arxiv_poop_scooper.db` (no re-export step — the canonical store is the .db file itself)
+- Writes directly to `data/arxiv_scooper.db` (no re-export step — the canonical store is the .db file itself)
 - Usage: `scq process <arxiv_id> [--note "..."]` (canonical) or
   `python3 tools/process_paper.py <arxiv_id>` (compat shim)
 
@@ -261,7 +261,7 @@ The primary workflow for adding papers from arXiv. Two-step process: fetch (host
 
 **`tools/init_database.py`** — SQLite database initializer and migration tool
 
-- Creates `arxiv_poop_scooper.db` with full schema (papers, figures, notes, highlights, collections, links, FTS5)
+- Creates `arxiv_scooper.db` with full schema (papers, figures, notes, highlights, collections, links, FTS5)
 - `--migrate` mode: extracts data from `paper_database.html` PAPERS array + `notes.json` + `search_index.json` into the database
 - `--stats` mode: prints table counts and index statistics
 - Backs up existing `.db` file before overwriting
@@ -379,9 +379,9 @@ Paper relevance scoring is **config-driven** — keywords, weights, and author b
 
 ### ~~Longer-term~~ SQLite backend (implemented)
 
-- ~~**SQLite backend via sql.js (WebAssembly)**~~ — All paper data, notes, highlights, collections, links, and read status stored in `arxiv_poop_scooper.db`. No more localStorage limits. Database loaded in browser via sql.js WASM (~1MB). "Save database" button downloads the full `.db` file. JSON export still available for backup/migration.
+- ~~**SQLite backend via sql.js (WebAssembly)**~~ — All paper data, notes, highlights, collections, links, and read status stored in `arxiv_scooper.db`. No more localStorage limits. Database loaded in browser via sql.js WASM (~1MB). "Save database" button downloads the full `.db` file. JSON export still available for backup/migration.
 - ~~**FTS5 full-text search**~~ — Paper metadata and PDF text indexed in SQLite FTS5 virtual tables with Porter stemming. Replaces the separate `search_index.json` file.
-- ~~**Data separated from presentation**~~ — Paper data no longer hardcoded in HTML files. All pages load from the shared `arxiv_poop_scooper.db` via `db_utils.js`. Adding papers only requires updating the database, not editing HTML.
+- ~~**Data separated from presentation**~~ — Paper data no longer hardcoded in HTML files. All pages load from the shared `arxiv_scooper.db` via `db_utils.js`. Adding papers only requires updating the database, not editing HTML.
 - ~~**Migration tooling**~~ — `tools/init_database.py --migrate` converts the old HTML PAPERS array + notes.json into the new SQLite database. Backs up existing `.db` before overwriting.
 
 ### ~~Web scraper~~ (implemented)

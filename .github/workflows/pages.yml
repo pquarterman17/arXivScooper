@@ -1,7 +1,7 @@
 name: Deploy to GitHub Pages
 
 # Publishes a read-only demo of the app at
-# https://pquarterman17.github.io/arXivPoopScooper/paper_database.html
+# https://pquarterman17.github.io/arXivScooper/paper_database.html
 #
 # How it works:
 #   - Triggered on every push to main (after Tests workflow passes — see
@@ -48,14 +48,14 @@ jobs:
           cp scraper_config.js db_utils.js _site/
           cp -r src _site/
           mkdir -p _site/data
-          cp data/arxiv_poop_scooper.db _site/data/ 2>/dev/null || echo "no DB checked in (Pages demo will start empty)"
+          cp data/arxiv_scooper.db _site/data/ 2>/dev/null || echo "no DB checked in (Pages demo will start empty)"
           cp references.bib references.txt _site/ 2>/dev/null || true
 
           # Add a small banner so visitors know this is a read-only demo.
           # Inject just before </body> in paper_database.html.
           cat > /tmp/banner.html <<'EOF'
           <div style="position:fixed;bottom:0;left:0;right:0;background:#000a;color:#fff;padding:6px 12px;font:12px/1.4 system-ui;text-align:center;z-index:9999">
-            Demo build — local changes (notes, ratings, new papers) are saved in your browser only. Source: <a href="https://github.com/pquarterman17/arXivPoopScooper" style="color:#7af">github.com/pquarterman17/arXivPoopScooper</a>
+            Demo build — local changes (notes, ratings, new papers) are saved in your browser only. Source: <a href="https://github.com/pquarterman17/arXivScooper" style="color:#7af">github.com/pquarterman17/arXivScooper</a>
           </div>
           EOF
           # Insert banner before </body> in both HTML pages.

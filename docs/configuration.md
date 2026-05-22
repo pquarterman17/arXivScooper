@@ -8,7 +8,7 @@ There are *four* kinds of "config" in this app, each with its own home and editi
 |---|---|---|---|
 | **Bootstrap** | Where the DB lives, paths to papers/figures/inbox/exports/digests dirs. Must be readable BEFORE the DB opens. | `data/user_config/paths.toml` (or env vars) | Hand-edit; `scq config paths` shows resolved values |
 | **Domain** | Search criteria, auto-tag rules, digest cadence, citation style, recipient list. The user's "research setup." | `data/user_config/<domain>.json` (overrides ship-defaults in `src/config/defaults/`) | Hand-edit; Settings v2 UI; `POST /api/config/<domain>`; `scq config show/get` |
-| **Session/UI prefs** | Theme, last open tab, table sort, column widths, PDF pane size. Bound to a specific DB. | `settings` table inside `arxiv_poop_scooper.db` | Settings UI only (rarely hand-edited) |
+| **Session/UI prefs** | Theme, last open tab, table sort, column widths, PDF pane size. Bound to a specific DB. | `settings` table inside `arxiv_scooper.db` | Settings UI only (rarely hand-edited) |
 | **Secrets** | SMTP password, API tokens. Never on disk in plaintext. | OS keyring via Python `keyring` (or env vars in CI) | `scq config set-secret`; `POST /api/secret` |
 
 Why split this way: bootstrap config can't depend on the DB (chicken-and-egg). Domain config benefits from being a plain file the user can version-control, share between machines, or back up. Session prefs are too noisy to commit and naturally belong with the DB they refer to. Secrets need OS-level protection.

@@ -1,8 +1,8 @@
-# arXivPoopScooper — Claude Session Guide
+# arXivScooper — Claude Session Guide
 
-This is a scientific literature management system for superconducting quantum computing (SCQ) research. It runs as two HTML pages served via a local Python server (`scq/server.py`, launched via `python -m scq serve` or by double-clicking `START.bat`), backed by a SQLite database (`data/arxiv_poop_scooper.db`, served directly via HTTP and loaded into the browser by sql.js).
+This is a scientific literature management system for superconducting quantum computing (SCQ) research. It runs as two HTML pages served via a local Python server (`scq/server.py`, launched via `python -m scq serve` or by double-clicking `START.bat`), backed by a SQLite database (`data/arxiv_scooper.db`, served directly via HTTP and loaded into the browser by sql.js).
 
-> Naming note: the project lives at `github.com/pquarterman17/arXivPoopScooper`. User-facing branding says "arXivPoopScooper"; internal docs and code may still say "SCQ" since the *research domain* (superconducting quantum computing) is unchanged. The Python package is `scq` and the env-var prefix is `SCQ_` — don't rename those. The database file was renamed from `scientific_litter_scoop.db` to `arxiv_poop_scooper.db` in 2026-05-03 to match the current project name.
+> Naming note: the project lives at `github.com/pquarterman17/arXivScooper`. User-facing branding says "arXivScooper"; internal docs and code may still say "SCQ" since the *research domain* (superconducting quantum computing) is unchanged. The Python package is `scq` and the env-var prefix is `SCQ_` — don't rename those. The repo was renamed from `arXivPoopScooper` to `arXivScooper` on 2026-05-21, and the database file was correspondingly renamed from `arxiv_poop_scooper.db` to `arxiv_scooper.db` (earlier history: `scientific_litter_scoop.db` → `arxiv_poop_scooper.db` on 2026-05-03; `scq_papers.db` → `scientific_litter_scoop.db` on 2026-05-01).
 
 > **Refactor complete (2026-05-03):** the layered architecture target
 > is reached. Frontend lives under `src/{core,services,ui,config,dev}/`,
@@ -74,7 +74,7 @@ scq process <arxiv_id> --note "optional note"
 
 Find `PROJECT_ROOT` dynamically:
 ```bash
-PROJECT_ROOT=$(find /sessions -name "arxiv_poop_scooper.db" -path "*/mnt/*/data/*" 2>/dev/null | head -1 | xargs dirname | xargs dirname)
+PROJECT_ROOT=$(find /sessions -name "arxiv_scooper.db" -path "*/mnt/*/data/*" 2>/dev/null | head -1 | xargs dirname | xargs dirname)
 ```
 
 **What it does (all automatic):**
@@ -85,7 +85,7 @@ PROJECT_ROOT=$(find /sessions -name "arxiv_poop_scooper.db" -path "*/mnt/*/data/
 5. Inserts into SQLite: paper entry, figures, FTS index, read status
 6. Appends to `references.bib` and `references.txt` (with duplicate detection)
 
-The DB at `data/arxiv_poop_scooper.db` is the canonical store; the browser fetches
+The DB at `data/arxiv_scooper.db` is the canonical store; the browser fetches
 it directly via HTTP and reads it with sql.js. There is no re-export step.
 
 ### Enriching a Paper
@@ -96,7 +96,7 @@ See the **enrich-paper** skill for full instructions. In short:
 2. Write a 2-3 sentence summary focused on what was done and why it matters
 3. Extract 3-5 key results as a JSON array of strings
 4. Identify the research group (e.g., "de Leon (Princeton)", "Ali (TU Delft)")
-5. Update the DB at `data/arxiv_poop_scooper.db` (no re-export step needed)
+5. Update the DB at `data/arxiv_scooper.db` (no re-export step needed)
 
 ## File Structure
 
@@ -104,16 +104,16 @@ The project is split between two OneDrive locations (paths shown below
 are examples — the actual values depend on your username and OneDrive
 mount). On macOS the equivalents live under
 `~/Library/CloudStorage/OneDrive-*` or wherever you sync OneDrive.
-- **Code repo:** `<OneDrive>\Coding\git\arXivPoopScooper\` — only code, configs, docs, and tests. No PDFs, no figures, no DB, no citations, no digests.
-- **Paper library (all user data):** `<OneDrive>\Work and School Research\arXivPoopScooper\`
+- **Code repo:** `<OneDrive>\Coding\git\arXivScooper\` — only code, configs, docs, and tests. No PDFs, no figures, no DB, no citations, no digests.
+- **Paper library (all user data):** `<OneDrive>\Work and School Research\arXivScooper\`
   - `papers/`, `figures/`, `inbox/` — surfaced in the repo via Windows directory junctions
-  - `database/arxiv_poop_scooper.db` — the SQLite database (resolver: `paths.db_path`)
+  - `database/arxiv_scooper.db` — the SQLite database (resolver: `paths.db_path`)
   - `citations/references.bib`, `citations/references.txt` — BibTeX + plain-text citations (resolver: `paths.references_bib_path` / `references_txt_path`)
   - `digests/digest_YYYY-MM-DD.html` — daily arXiv-digest reports (resolver: `paths.digests_dir`)
 - The repo's `data/user_config/paths.toml` (gitignored) maps each name above to its OneDrive absolute path. New machines copy `paths.toml.example`, edit, and the resolver picks up the override.
 
 ```
-arXivPoopScooper/
+arXivScooper/
 ├── START.bat                Double-click to launch (Windows)
 ├── scq/server.py            Local server + arXiv API proxy + no-cache headers (renamed from serve.py 2026-05-03)
 ├── paper_database.html      Main app (Library / Reading List / Cite / Settings)
@@ -121,9 +121,9 @@ arXivPoopScooper/
 ├── dev.html                 Storybook-style dev harness for UI modules
 ├── db_utils.js              sql.js IIFE used by the inline boot blocks; new code uses src/core/db.js
 ├── scraper_config.js        Ship-default scraper config; user overrides flow through src/config/ + the search-config-bridge
-├── (references.bib + .txt)  → arXivPoopScooper/citations/ (external; see paths.toml)
+├── (references.bib + .txt)  → arXivScooper/citations/ (external; see paths.toml)
 ├── data/
-│   ├── arxiv_poop_scooper.db    Canonical SQLite database (served via HTTP)
+│   ├── arxiv_scooper.db    Canonical SQLite database (served via HTTP)
 │   ├── migrations/          Versioned schema (001_initial.sql, etc.)
 │   └── user_config/         User overrides (gitignored) + .example starters
 │       └── relevance.json.example   Relevance profile template
@@ -151,10 +151,10 @@ arXivPoopScooper/
 │   ├── doctor.py              `scq doctor` — local health-check (9 aspects)
 │   ├── monitor.py             `scq monitor` — GitHub Actions digest run status
 │   └── relevance.py           `scq relevance show/learn/test` — config-driven ranking
-├── papers/                  [Junction → arXivPoopScooper\papers] PDFs: <arXivId>_<Author>_<ShortTitle>.pdf
-├── figures/                 [Junction → arXivPoopScooper\figures] Extracted figures by arXiv ID
+├── papers/                  [Junction → arXivScooper\papers] PDFs: <arXivId>_<Author>_<ShortTitle>.pdf
+├── figures/                 [Junction → arXivScooper\figures] Extracted figures by arXiv ID
 │   └── <arXivId>/           fig1.jpg, fig2.jpg, ..., captions.json
-├── inbox/                   [Junction → arXivPoopScooper\inbox] Staging area for _meta.json files
+├── inbox/                   [Junction → arXivScooper\inbox] Staging area for _meta.json files
 ├── tools/                   Thin compat shims that delegate to scq.* (kept so existing
 │                              docs and skill scripts keep working unchanged)
 ├── docs/                    Architecture deep-dives (README, architecture, configuration,
@@ -187,14 +187,14 @@ arXivPoopScooper/
 - **settings** — key, value (JSON) — stores user preferences like sources/presets
 - **papers_fts** — FTS5 full-text search index over papers
 
-The DB is `data/arxiv_poop_scooper.db`, a regular SQLite file. To work with it from Python:
+The DB is `data/arxiv_scooper.db`, a regular SQLite file. To work with it from Python:
 
 ```python
 import sqlite3, glob
 
 # Find the repo root dynamically (sandbox or local)
-matches = glob.glob("/sessions/*/mnt/*/data/arxiv_poop_scooper.db")
-DB = matches[0] if matches else "data/arxiv_poop_scooper.db"
+matches = glob.glob("/sessions/*/mnt/*/data/arxiv_scooper.db")
+DB = matches[0] if matches else "data/arxiv_scooper.db"
 
 conn = sqlite3.connect(DB)
 conn.execute("PRAGMA foreign_keys = ON")
@@ -212,8 +212,8 @@ The `scq.db.connection` helper (in `scq/db/connection.py`) does this for you and
 | Node.js path | `C:\Program Files\nodejs\node.exe` | `node` (in PATH) |
 | Fetch wrapper | `fetch.bat` (or `run_fetch.bat` in Temp) | `bash tools/fetch.sh` |
 | DC shell | Use `shell: "cmd"` (PowerShell eats stdout) | Default shell works |
-| Code path | `<OneDrive>\Coding\git\arXivPoopScooper` | `~/Library/CloudStorage/OneDrive-*/Coding/git/arXivPoopScooper` (or wherever you sync) |
-| Data path | `<OneDrive>\Work and School Research\arXivPoopScooper` (junctioned into the repo as `papers/`, `figures/`, `inbox/`) | Equivalent OneDrive path on the Mac side |
+| Code path | `<OneDrive>\Coding\git\arXivScooper` | `~/Library/CloudStorage/OneDrive-*/Coding/git/arXivScooper` (or wherever you sync) |
+| Data path | `<OneDrive>\Work and School Research\arXivScooper` (junctioned into the repo as `papers/`, `figures/`, `inbox/`) | Equivalent OneDrive path on the Mac side |
 | Python (sandbox) | Always Linux sandbox — same on both | Same |
 
 ## arXiv API Connectivity

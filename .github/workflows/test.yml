@@ -134,9 +134,9 @@ jobs:
           curl -fsS -o /tmp/db.html "http://127.0.0.1:$PORT/paper_database.html"
           test "$(wc -c </tmp/db.html)" -gt 1000
 
-      - name: GET /data/arxiv_poop_scooper.db returns binary
+      - name: GET /data/arxiv_scooper.db returns binary
         run: |
-          curl -fsS -o /tmp/db.bytes "http://127.0.0.1:$PORT/data/arxiv_poop_scooper.db"
+          curl -fsS -o /tmp/db.bytes "http://127.0.0.1:$PORT/data/arxiv_scooper.db"
           # SQLite files start with the literal "SQLite format 3" header
           head -c 16 /tmp/db.bytes | grep -q "SQLite format 3"
 
