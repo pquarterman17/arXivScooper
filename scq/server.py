@@ -264,6 +264,12 @@ def open_tabs(port, which):
 ARXIV_API_BASE = "https://arxiv.org/api/query"
 ARXIV_USER_AGENT = "SCQDatabase/1.0 (+https://github.com/pquarterman17/arXivScooper)"
 
+# PatentsView (USPTO) Search API. The browser/host hits /api/patents/<rest>
+# and we forward to PATENTSVIEW_API_BASE/<rest>, injecting the X-Api-Key
+# header from the 'patentsview_api_key' secret so the key never reaches the
+# client. See scq/patents/providers/patentsview.py for the request shapes.
+PATENTSVIEW_API_BASE = "https://search.patentsview.org/api/v1"
+
 
 class SCQHandler(http.server.SimpleHTTPRequestHandler):
     """Serves static files + proxies arXiv API requests."""
@@ -287,6 +293,8 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/arxiv"):
             self._proxy_arxiv()
+        elif self.path.startswith("/api/patents"):
+            self._proxy_patents()
         elif self.path.startswith("/api/crossref/search"):
             self._proxy_crossref_search()
         elif self.path.startswith("/api/crossref/"):
@@ -370,6 +378,62 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(f"Proxy error: {e}".encode())
+
+    def _proxy_patents(self):
+        """Forward request to PatentsView, injecting the X-Api-Key header.
+
+        Path format: /api/patents/<endpoint>?<query> →
+        https://search.patentsview.org/api/v1/<endpoint>?<query>
+        The API key is read from the 'patentsview_api_key' secret so it
+        never has to live in client-side JS. Returns 503 if no key is set.
+        """
+        from scq.config import secrets as secrets_mod
+
+        api_key = secrets_mod.get("patentsview_api_key")
+        if not api_key:
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(
+                b'{"error": "PatentsView API key not set. Run: '
+                b'scq config set-secret patentsview_api_key"}'
+            )
+            return
+
+        rest = self.path[len("/api/patents") :].lstrip("/")
+        target = f"{PATENTSVIEW_API_BASE}/{rest}"
+        req = urllib.request.Request(
+            target,
+            headers={
+                "X-Api-Key": api_key,
+                "Accept": "application/json",
+                "User-Agent": "arXivScooper/1.0 (+https://github.com/pquarterman17/arXivScooper)",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = resp.read()
+                self.send_response(resp.status)
+                self.send_header(
+                    "Content-Type", resp.headers.get("Content-Type", "application/json")
+                )
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+        except urllib.error.HTTPError as e:
+            self.send_response(e.code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(f'{{"error": "PatentsView returned {e.code}: {e.reason}"}}'.encode())
+        except Exception as e:  # noqa: BLE001
+            self.send_response(502)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(f'{{"error": "Proxy error: {e}"}}'.encode())
 
     def _proxy_crossref(self):
         """Forward request to CrossRef API with proper headers.

@@ -267,6 +267,31 @@ scq relevance learn          # scans read/starred papers, suggests author boosts
 scq relevance test "query"   # scores a paper and explains every keyword/author match
 ```
 
+## Patents (Phase 1)
+
+Patents are a first-class entity alongside arXiv papers, stored in a
+**separate `patents` table** (migration `002_patents.sql`). The package
+`scq/patents/` mirrors `scq/arxiv/`: `providers/patentsview.py` (USPTO
+PatentsView, the first source), `normalize.py` (canonical `Patent` +
+patent-number parsing), `store.py`, `summarize.py`, `cli.py`. Full design
+and phasing live in `plans/patent-scraping.md`.
+
+The flow mirrors add-paper's host/sandbox split:
+```bash
+scq patents fetch US10374134B2      # network (host): PatentsView → inbox/<num>_patent.json
+scq patents process US10374134B2    # sandbox: inbox JSON → patents table
+scq patents show US10374134B2       # print a stored patent
+```
+PatentsView needs a free API key: `scq config set-secret patentsview_api_key`
+(or `SCQ_PATENTSVIEW_API_KEY`). The browser/host routes through the
+`/api/patents` proxy in `scq/server.py`, which injects the key header.
+
+After `process`, use the **summarize-patent** skill to translate the claim
+legalese into three plain-English fields: `plain_summary` (what it does),
+`protected_scope` (a plain reading of the independent claims = the real
+legal scope), and `prior_art_note` (what it builds on). CPC/IPC codes are
+stored but not yet scored — relevance scoring is Phase 2.
+
 ## Common Tasks Quick Reference
 
 **Add paper:** Use the `add-paper` skill, or manually: fetch.bat/sh → process_paper.py → enrich

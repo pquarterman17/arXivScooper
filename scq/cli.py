@@ -150,6 +150,8 @@ _PASSTHROUGH_COMMANDS = {
     "monitor": _passthrough_module("scq.monitor", supports_argv=True),
     # relevance: config-driven scoring management.
     "relevance": _passthrough_module("scq.relevance", supports_argv=True),
+    # patents: fetch/process/show patents (PatentsView).
+    "patents": _passthrough_module("scq.patents.cli", supports_argv=True),
 }
 
 
@@ -171,6 +173,7 @@ _PASSTHROUGH_MODULES = {
     "migrate-from-legacy": "scq.migrate",
     "monitor": "scq.monitor",
     "relevance": "scq.relevance",
+    "patents": "scq.patents.cli",
 }
 
 
@@ -290,6 +293,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "relevance",
         help="inspect/improve relevance scoring (show / learn / test <id|title>)",
+        add_help=False,
+    )
+    sub.add_parser(
+        "patents",
+        help="fetch/process/show patents from PatentsView (fetch / process / show <number>)",
         add_help=False,
     )
 
