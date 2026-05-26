@@ -1,0 +1,23 @@
+#!/bin/sh
+# arXivScooper pre-commit secret tripwire.
+#
+# Enabled by pointing git at this directory:
+#     git config core.hooksPath tools/hooks
+# (run once per clone; see tools/hooks/README.md).
+#
+# Delegates to the Python scanner, preferring the project venv's python
+# so scq.config.secrets is importable for the known-value scan. Falls
+# back to python3/python on PATH (the scanner degrades gracefully to its
+# pattern layer if scq can't be imported).
+
+root="$(git rev-parse --show-toplevel)"
+scanner="$root/tools/hooks/pre_commit_secret_scan.py"
+
+for py in "$root/.venv/Scripts/python.exe" "$root/.venv/bin/python" python3 python; do
+    if command -v "$py" >/dev/null 2>&1 || [ -x "$py" ]; then
+        exec "$py" "$scanner"
+    fi
+done
+
+echo "pre-commit: no python interpreter found; skipping secret scan" >&2
+exit 0
