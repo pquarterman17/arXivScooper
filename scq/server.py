@@ -264,11 +264,15 @@ def open_tabs(port, which):
 ARXIV_API_BASE = "https://arxiv.org/api/query"
 ARXIV_USER_AGENT = "SCQDatabase/1.0 (+https://github.com/pquarterman17/arXivScooper)"
 
-# PatentsView (USPTO) Search API. The browser/host hits /api/patents/<rest>
-# and we forward to PATENTSVIEW_API_BASE/<rest>, injecting the X-Api-Key
-# header from the 'patentsview_api_key' secret so the key never reaches the
-# client. See scq/patents/providers/patentsview.py for the request shapes.
-PATENTSVIEW_API_BASE = "https://search.patentsview.org/api/v1"
+# PatentsView (USPTO) PatentSearch API. The browser/host hits
+# /api/patents/<rest> and we forward to PATENTSVIEW_API_BASE/<rest>,
+# injecting the X-Api-Key header from the 'patentsview_api_key' secret so
+# the key never reaches the client. Overridable via SCQ_PATENTSVIEW_API_BASE
+# so a future host relocation (PatentsView→ODP migration) is config, not
+# code. See scq/patents/providers/patentsview.py for the request shapes.
+PATENTSVIEW_API_BASE = os.environ.get(
+    "SCQ_PATENTSVIEW_API_BASE", "https://search.patentsview.org/api/v1"
+).rstrip("/")
 
 
 class SCQHandler(http.server.SimpleHTTPRequestHandler):

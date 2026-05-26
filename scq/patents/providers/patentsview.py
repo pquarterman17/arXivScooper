@@ -22,6 +22,7 @@ crashing the ingest.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,8 +30,27 @@ from collections.abc import Callable
 
 from ..normalize import Patent, parse_patent_number, split_independent
 
-API_BASE = "https://search.patentsview.org/api/v1"
+# Default base for the PatentsView *PatentSearch* API (the modern q/f/o API
+# offering the `patent` and `g_claim` entities). NOT the dead legacy
+# api.patentsview.org (410 Gone since 2025-05), and NOT the USPTO ODP
+# Patent File Wrapper API (data.uspto.gov) — that's prosecution data for
+# applications only, with no granted-claim fulltext. As of 2026-05 this
+# base survives the PatentsView→ODP platform migration (Swagger still at
+# search.patentsview.org/swagger-ui/), but USPTO could relocate the host
+# later, so it's overridable via SCQ_PATENTSVIEW_API_BASE without a code
+# change. See plans/patent-scraping.md for the product distinction.
+DEFAULT_API_BASE = "https://search.patentsview.org/api/v1"
 SOURCE = "patentsview"
+
+
+def _api_base() -> str:
+    """Resolve the PatentSearch API base, honoring SCQ_PATENTSVIEW_API_BASE.
+
+    Read at call time (not import) so a config/env change takes effect
+    without reimporting the module — and so tests can override it.
+    """
+    return os.environ.get("SCQ_PATENTSVIEW_API_BASE", DEFAULT_API_BASE).rstrip("/")
+
 
 # Fields requested from the patent endpoint. Keep narrow — PatentsView
 # bills nothing but large field sets are slower and noisier to parse.
@@ -59,7 +79,7 @@ def build_patent_request(doc_number: str, api_key: str) -> tuple[str, dict]:
     """Build the (url, headers) for the bibliographic patent query."""
     q = json.dumps({"patent_id": doc_number})
     f = json.dumps(_PATENT_FIELDS)
-    url = f"{API_BASE}/patent/?q={urllib.parse.quote(q)}&f={urllib.parse.quote(f)}"
+    url = f"{_api_base()}/patent/?q={urllib.parse.quote(q)}&f={urllib.parse.quote(f)}"
     return url, _headers(api_key)
 
 
@@ -69,7 +89,7 @@ def build_claims_request(doc_number: str, api_key: str) -> tuple[str, dict]:
     f = json.dumps(_CLAIM_FIELDS)
     o = json.dumps({"size": 500})  # plenty for any single patent's claims
     url = (
-        f"{API_BASE}/g_claim/?q={urllib.parse.quote(q)}"
+        f"{_api_base()}/g_claim/?q={urllib.parse.quote(q)}"
         f"&f={urllib.parse.quote(f)}&o={urllib.parse.quote(o)}"
     )
     return url, _headers(api_key)

@@ -167,6 +167,17 @@ def test_fetch_patent_with_injected_http():
     assert len(calls) == 2  # patent + claims endpoints
 
 
+def test_api_base_default_and_override(monkeypatch):
+    monkeypatch.delenv("SCQ_PATENTSVIEW_API_BASE", raising=False)
+    url, _ = patentsview.build_patent_request("10374134", "KEY")
+    assert url.startswith("https://search.patentsview.org/api/v1/patent/")
+
+    monkeypatch.setenv("SCQ_PATENTSVIEW_API_BASE", "https://api.uspto.gov/v1/")
+    url2, _ = patentsview.build_claims_request("10374134", "KEY")
+    # Trailing slash is stripped; host swap takes effect at call time.
+    assert url2.startswith("https://api.uspto.gov/v1/g_claim/")
+
+
 def test_fetch_patent_requires_api_key():
     with pytest.raises(ValueError):
         patentsview.fetch_patent("US10374134B2", api_key="")
