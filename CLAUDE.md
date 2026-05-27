@@ -278,13 +278,23 @@ and phasing live in `plans/patent-scraping.md`.
 
 The flow mirrors add-paper's host/sandbox split:
 ```bash
-scq patents fetch US10374134B2      # network (host): PatentsView → inbox/<num>_patent.json
+scq patents fetch US10374134B2      # network (host): provider → inbox/<num>_patent.json
 scq patents process US10374134B2    # sandbox: inbox JSON → patents table
 scq patents show US10374134B2       # print a stored patent
 ```
-PatentsView needs a free API key: `scq config set-secret patentsview_api_key`
-(or `SCQ_PATENTSVIEW_API_KEY`). The browser/host routes through the
-`/api/patents` proxy in `scq/server.py`, which injects the key header.
+
+Two providers, selected with `--source` (both converge on the canonical
+`Patent` shape, so everything downstream is source-agnostic):
+- **`google`** (default) — keyless HTML scrape of `patents.google.com`.
+  No API key, works immediately; bibliographic data from server-rendered
+  `<meta>` tags is reliable, claims extraction is best-effort/brittle.
+  ToS-gray — fine for personal low-volume research use.
+- **`patentsview`** — USPTO PatentsView PatentSearch API. Needs a free
+  key: `scq config set-secret patentsview_api_key` (or `SCQ_PATENTSVIEW_API_KEY`).
+  More robust + structured claims. The browser/host routes through the
+  `/api/patents` proxy in `scq/server.py`, which injects the key header.
+  Base overridable via `SCQ_PATENTSVIEW_API_BASE` (see the migration note
+  in `plans/patent-scraping.md`).
 
 After `process`, use the **summarize-patent** skill to translate the claim
 legalese into three plain-English fields: `plain_summary` (what it does),

@@ -57,13 +57,19 @@ def _patent_from_json(d: dict) -> Patent:
 
 
 def _cmd_fetch(args: argparse.Namespace) -> int:
-    from .providers import patentsview
+    from .providers import google, patentsview
 
-    api_key = _resolve_api_key(args.api_key)
+    # Provider dispatch. All providers expose fetch_patent(number, *, http,
+    # **kwargs) → Patent; patentsview additionally consumes api_key. Google
+    # is the default: keyless, works immediately.
+    providers = {"google": google.fetch_patent, "patentsview": patentsview.fetch_patent}
+    fetch = providers[args.source]
+    kwargs: dict = {"fetch_claims": not args.no_claims}
+    if args.source == "patentsview":
+        kwargs["api_key"] = _resolve_api_key(args.api_key)
+
     try:
-        patent = patentsview.fetch_patent(
-            args.number, api_key=api_key, fetch_claims=not args.no_claims
-        )
+        patent = fetch(args.number, **kwargs)
     except ValueError as e:  # missing api key / bad number
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -146,9 +152,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scq patents", description="fetch and inspect patents")
     sub = parser.add_subparsers(dest="cmd", metavar="<command>")
 
-    p_fetch = sub.add_parser("fetch", help="fetch a patent from PatentsView into the inbox")
+    p_fetch = sub.add_parser("fetch", help="fetch a patent into the inbox")
     p_fetch.add_argument("number", help="patent number, e.g. US10374134B2 or 10374134")
-    p_fetch.add_argument("--api-key", help="PatentsView API key (overrides secret/env)")
+    p_fetch.add_argument(
+        "--source",
+        choices=("google", "patentsview"),
+        default="google",
+        help="data source (default: google — keyless HTML scrape)",
+    )
+    p_fetch.add_argument(
+        "--api-key", help="PatentsView API key (overrides secret/env; --source patentsview only)"
+    )
     p_fetch.add_argument("--no-claims", action="store_true", help="skip the claims fetch")
     p_fetch.add_argument(
         "--process", action="store_true", help="also insert into the DB (needs network locally)"

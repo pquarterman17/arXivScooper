@@ -8,6 +8,7 @@ leg is injected with a stub returning captured-shaped JSON.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -188,6 +189,68 @@ def test_fetch_patent_raises_on_empty_result():
         patentsview.fetch_patent("US999B2", api_key="KEY", http=lambda u, h: {"patents": []})
 
 
+# ─── Google Patents provider (HTML scrape) ───
+
+from scq.patents.providers import google  # noqa: E402
+
+_GOOGLE_HTML = """<html><head>
+<meta name="DC.title" content="Superconducting qubit with tantalum">
+<meta scheme="inventor" name="DC.contributor" content="Jay Gambetta">
+<meta scheme="inventor" name="DC.contributor" content="Jerry Chow">
+<meta scheme="assignee" name="DC.contributor" content="International Business Machines">
+<meta scheme="dateApplicationFiling" name="DC.date" content="2017-01-10">
+<meta scheme="datePublication" name="DC.date" content="2019-08-06">
+<meta name="DC.description" content="A qubit comprising a tantalum capacitor pad.">
+</head><body>
+<section itemprop="claims"><div class="claim">1. A superconducting qubit comprising a tantalum pad.
+2. The qubit of claim 1 wherein the pad is alpha-phase.</div></section>
+</body></html>"""
+
+
+def test_google_build_request_uses_canonical_number():
+    url, headers = google.build_request("10,374,134 B2")
+    assert url == "https://patents.google.com/patent/US10374134B2/en"
+    assert "User-Agent" in headers
+
+
+def test_google_parse_html_biblio():
+    info = parse_patent_number("US10374134B2")
+    p = google.parse_html(_GOOGLE_HTML, number_info=info)
+    assert p.title == "Superconducting qubit with tantalum"
+    assert p.inventors == ["Jay Gambetta", "Jerry Chow"]
+    assert p.assignee == "International Business Machines"
+    assert p.filing_date == "2017-01-10"
+    assert p.grant_date == "2019-08-06"
+    assert p.abstract.startswith("A qubit comprising")
+    assert p.source == "google"
+
+
+def test_google_parse_html_claims_and_independence():
+    info = parse_patent_number("US10374134B2")
+    p = google.parse_html(_GOOGLE_HTML, number_info=info)
+    assert len(p.claims) == 2
+    assert p.claims[0]["num"] == 1
+    # Claim 1 is independent; claim 2 references "claim 1".
+    assert p.independent_claims == ["A superconducting qubit comprising a tantalum pad."]
+
+
+def test_google_fetch_patent_with_injected_http():
+    p = google.fetch_patent("US10374134B2", http=lambda u, h: _GOOGLE_HTML)
+    assert p.number == "US10374134B2"
+    assert p.assignee == "International Business Machines"
+
+
+def test_google_fetch_patent_raises_when_unparseable():
+    with pytest.raises(LookupError):
+        google.fetch_patent("US10374134B2", http=lambda u, h: "<html><body>nope</body></html>")
+
+
+def test_google_fetch_ignores_api_key_kwarg():
+    # The CLI passes provider-agnostic kwargs; google must tolerate api_key.
+    p = google.fetch_patent("US10374134B2", http=lambda u, h: _GOOGLE_HTML, fetch_claims=True)
+    assert p.title
+
+
 # ─── store roundtrip ───
 
 
@@ -319,6 +382,19 @@ def test_cli_show_existing(db_file, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "International Business Machines" in out
+
+
+def test_cli_fetch_defaults_to_google(tmp_path, monkeypatch):
+    # Default source is google (keyless) — no api_key needed.
+    monkeypatch.setattr(google, "_default_http", lambda u, h: _GOOGLE_HTML, raising=True)
+    out_file = tmp_path / "US10374134B2_patent.json"
+    monkeypatch.setattr(patents_cli, "_inbox_json_path", lambda canon: out_file, raising=True)
+    rc = patents_cli.main(["fetch", "US10374134B2"])
+    assert rc == 0
+    assert out_file.exists()
+    saved = json.loads(out_file.read_text("utf-8"))
+    assert saved["assignee"] == "International Business Machines"
+    assert saved["source"] == "google"
 
 
 def test_cli_no_subcommand_prints_help():
