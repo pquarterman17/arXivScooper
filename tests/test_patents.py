@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scq.db.migrations import apply_pending
 from scq.patents import cli as patents_cli
+from scq.patents import relevance as patent_relevance
 from scq.patents import store, summarize
 from scq.patents.normalize import Patent, parse_patent_number, split_independent
 from scq.patents.providers import patentsview
@@ -276,6 +277,96 @@ def test_google_fetch_ignores_api_key_kwarg():
     assert p.title
 
 
+# ─── relevance scoring (CPC + assignee + keywords) ───
+
+_REL_CFG = {
+    "titleMultiplier": 2.0,
+    "minScoreToInclude": 5,
+    "effectiveKeywords": {"transmon": 9.0, "tantalum": 8.0},
+    "keywordToProfiles": {"transmon": ["coherence"], "tantalum": ["materials"]},
+    "cpcBoosts": {"G06N10": 10.0, "H10N60": 9.0},
+    "assigneeBoosts": {"International Business Machines": 6.0},
+}
+
+
+def test_score_patent_combines_keywords_cpc_assignee():
+    p = {
+        "title": "Transmon qubit",
+        "abstract": "A tantalum pad reduces loss.",
+        "claims": [{"text": "A transmon comprising tantalum."}],
+        "cpc_codes": ["G06N10/40", "H10N60/12"],
+        "assignee": "International Business Machines Corp",
+    }
+    score = patent_relevance.score_patent(p, _REL_CFG)
+    # CPC: G06N10 (+10) + H10N60 (+9) = 19; assignee +6; plus keyword hits.
+    assert score > 25
+    assert p["matched_cpc"] == ["G06N10", "H10N60"]
+    assert p["matched_assignees"] == ["International Business Machines"]
+    assert "transmon" in p["matched_keywords"]
+    assert "tantalum" in p["matched_keywords"]
+    assert p["relevance_score"] == max(score, 0)
+
+
+def test_score_patent_cpc_prefix_match_counts_once():
+    p = {"title": "x", "abstract": "", "claims": [], "cpc_codes": ["G06N10/40", "G06N10/60"]}
+    patent_relevance.score_patent(p, _REL_CFG)
+    # Two codes share the G06N10 prefix → the prefix boost counts once.
+    assert p["matched_cpc"] == ["G06N10"]
+    assert p["relevance_score"] == 10.0
+
+
+def test_score_patent_no_signals_is_zero():
+    p = {"title": "Unrelated widget", "abstract": "", "claims": [], "cpc_codes": ["A01B1/00"], "assignee": "Acme"}
+    assert patent_relevance.score_patent(p, _REL_CFG) == 0
+    assert p["matched_cpc"] == []
+
+
+def test_score_patent_keywords_use_word_boundaries():
+    # "MBE" must NOT match inside "number"; "TiN" must NOT match "destination".
+    cfg = {
+        "titleMultiplier": 2.0,
+        "minScoreToInclude": 5,
+        "effectiveKeywords": {"MBE": 8.0, "TiN": 8.0},
+        "keywordToProfiles": {},
+        "cpcBoosts": {},
+        "assigneeBoosts": {},
+    }
+    p = {
+        "title": "Method for node ranking",
+        "abstract": "A large number of documents at a destination.",
+        "claims": [],
+        "cpc_codes": [],
+    }
+    assert patent_relevance.score_patent(p, cfg) == 0
+    assert p["matched_keywords"] == []
+    # But a real whole-word hit still scores.
+    p2 = {"title": "MBE growth of TiN films", "abstract": "", "claims": [], "cpc_codes": []}
+    patent_relevance.score_patent(p2, cfg)
+    assert set(p2["matched_keywords"]) == {"MBE", "TiN"}
+
+
+def test_score_patent_claims_as_strings():
+    p = {"title": "", "abstract": "", "claims": ["A transmon device."], "cpc_codes": []}
+    patent_relevance.score_patent(p, _REL_CFG)
+    assert "transmon" in p["matched_keywords"]
+
+
+def test_effective_config_surfaces_cpc_and_assignee_boosts():
+    from scq.arxiv.search import _build_effective_config
+
+    eff = _build_effective_config(
+        {
+            "titleMultiplier": 2.0,
+            "minScoreToInclude": 5,
+            "cpcBoosts": {"G06N10": 10},
+            "assigneeBoosts": {"Google": 5},
+            "profiles": {},
+        }
+    )
+    assert eff["cpcBoosts"] == {"G06N10": 10.0}
+    assert eff["assigneeBoosts"] == {"Google": 5.0}
+
+
 # ─── store roundtrip ───
 
 
@@ -393,6 +484,61 @@ def test_parse_summary_response_raises_without_json():
         summarize.parse_summary_response("no json here")
 
 
+def test_summarize_patent_with_injected_llm():
+    captured = {}
+
+    def fake_llm(prompt):
+        captured["prompt"] = prompt
+        return '{"plain_summary": "Does X.", "protected_scope": "Covers Y.", "prior_art_note": "Builds on Z."}'
+
+    rec = {"number": "US1", "title": "T", "independent_claims": ["A widget."], "claims": [{}]}
+    out = summarize.summarize_patent(rec, fake_llm)
+    assert "A widget." in captured["prompt"]  # prompt built from the patent
+    assert out["plain_summary"] == "Does X."
+    assert out["prior_art_note"] == "Builds on Z."
+
+
+def test_cli_summarize_print_prompt(db_file, capsys):
+    c = db_file()
+    store.upsert_patent(c, _sample_patent())
+    c.close()
+    rc = patents_cli.main(["summarize", "US10374134B2", "--print-prompt"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "INDEPENDENT CLAIMS" in out
+
+
+def test_cli_summarize_no_llm_falls_back_to_prompt(db_file, monkeypatch, capsys):
+    c = db_file()
+    store.upsert_patent(c, _sample_patent())
+    c.close()
+    # No LLM available → return code 2 and the prompt is printed for manual use.
+    monkeypatch.setattr(patents_cli, "_anthropic_llm", lambda model: None, raising=True)
+    rc = patents_cli.main(["summarize", "US10374134B2"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "INDEPENDENT CLAIMS" in out
+
+
+def test_cli_summarize_with_fake_llm_stores(db_file, monkeypatch, capsys):
+    c = db_file()
+    store.upsert_patent(c, _sample_patent())
+    c.close()
+    monkeypatch.setattr(
+        patents_cli,
+        "_anthropic_llm",
+        lambda model: (lambda prompt: '{"plain_summary": "A tantalum transmon patent."}'),
+        raising=True,
+    )
+    rc = patents_cli.main(["summarize", "US10374134B2"])
+    assert rc == 0
+    # Verify it persisted.
+    c2 = db_file()
+    rec = store.get_patent(c2, "US10374134B2")
+    c2.close()
+    assert rec["plain_summary"] == "A tantalum transmon patent."
+
+
 # ─── CLI routing ───
 
 
@@ -447,6 +593,72 @@ def test_cli_fetch_defaults_to_google(tmp_path, monkeypatch):
 
 def test_cli_no_subcommand_prints_help():
     assert patents_cli.main([]) == 1
+
+
+# ─── assignee monitoring (#8 scaffold) ───
+
+
+def test_search_by_assignee_parses_and_requires_key():
+    payload = {
+        "patents": [
+            {
+                "patent_id": "10374134",
+                "patent_title": "Qubit",
+                "patent_date": "2019-08-06",
+                "assignees": [{"assignee_organization": "International Business Machines"}],
+            }
+        ]
+    }
+    rows = patentsview.search_by_assignee("IBM", api_key="KEY", http=lambda u, h: payload)
+    assert rows == [
+        {
+            "number": "10374134",
+            "title": "Qubit",
+            "assignee": "International Business Machines",
+            "grant_date": "2019-08-06",
+        }
+    ]
+    with pytest.raises(ValueError):
+        patentsview.search_by_assignee("IBM", api_key="")
+
+
+def test_build_assignee_search_includes_date_filter():
+    url, _ = patentsview.build_assignee_search_request("IBM", "KEY", since="2026-01-01")
+    assert "_gte" in url and "patent_date" in url
+
+
+def test_cli_monitor_requires_assignee():
+    assert patents_cli.main(["monitor"]) == 2
+
+
+def test_cli_monitor_dedups_and_reports(db_file, monkeypatch, capsys):
+    # Seed one already-stored patent so it's deduped out.
+    c = db_file()
+    store.upsert_patent(c, _sample_patent())  # US10374134B2
+    c.close()
+
+    def fake_search(name, *, api_key, since=None, http=None):
+        return [
+            {"number": "10374134", "title": "Already stored", "assignee": name, "grant_date": ""},
+            {"number": "11111111", "title": "Brand new qubit patent", "assignee": name, "grant_date": ""},
+        ]
+
+    monkeypatch.setattr(patentsview, "search_by_assignee", fake_search, raising=True)
+    rc = patents_cli.main(["monitor", "--assignee", "IBM"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    # US10374134B2 is stored (number "10374134") → deduped; 11111111 is new.
+    assert "11111111" in out
+    assert "1 new patent" in out
+
+
+def test_cli_monitor_dormant_without_key(db_file, monkeypatch, capsys):
+    def no_key_search(name, *, api_key, since=None, http=None):
+        raise ValueError("PatentsView requires an API key.")
+
+    monkeypatch.setattr(patentsview, "search_by_assignee", no_key_search, raising=True)
+    rc = patents_cli.main(["monitor", "--assignee", "IBM"])
+    assert rc == 2
 
 
 def test_cli_patents_routes_through_top_level():

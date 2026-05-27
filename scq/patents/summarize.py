@@ -18,6 +18,7 @@ reusable from either driver. Storage is :func:`scq.patents.store.store_summary`.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 # The three fields every patent summary captures (the user's Phase 1 pick).
 SUMMARY_FIELDS = ("plain_summary", "protected_scope", "prior_art_note")
@@ -71,6 +72,18 @@ def build_summary_prompt(patent: dict) -> str:
     lines.append("")
     lines.append(f"(plus {dep_count} dependent claim(s) not shown)")
     return "\n".join(lines)
+
+
+def summarize_patent(patent: dict, llm: Callable[[str], str]) -> dict:
+    """Summarize a patent with an injectable LLM callable.
+
+    ``llm`` takes the prompt string and returns the model's reply text.
+    This is the seam that lets the same logic drive both an interactive
+    Claude call and a future automated digest run without this module
+    depending on any particular SDK. Returns the parsed
+    {plain_summary, protected_scope, prior_art_note} dict.
+    """
+    return parse_summary_response(llm(build_summary_prompt(patent)))
 
 
 def parse_summary_response(reply: str) -> dict:

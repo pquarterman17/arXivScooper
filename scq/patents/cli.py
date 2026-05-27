@@ -148,6 +148,165 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _digits(number: str) -> str:
+    """The digit run of a patent number, for format-agnostic dedup."""
+    try:
+        return parse_patent_number(number)["doc_number"]
+    except ValueError:
+        return number
+
+
+def _cmd_monitor(args: argparse.Namespace) -> int:
+    """Find recent filings by tracked assignees, dedup against the DB.
+
+    Dormant until a PatentsView key is stored (search needs it). With
+    --add, new patents are fetched + stored via the chosen source.
+    """
+    from datetime import date, timedelta
+
+    from scq.db.connection import connect
+
+    from .providers import patentsview
+    from .store import existing_numbers
+
+    assignees = args.assignee or []
+    if not assignees:
+        print("error: pass at least one --assignee NAME", file=sys.stderr)
+        return 2
+    since = (date.today() - timedelta(days=args.days)).isoformat()
+    api_key = _resolve_api_key(args.api_key)
+
+    conn = connect()
+    try:
+        have = existing_numbers(conn)
+    finally:
+        conn.close()
+    # Dedup on the digit run, not the full number: PatentsView returns bare
+    # digits ("10374134") while stored numbers are canonical ("US10374134B2"),
+    # so a string compare would never match.
+    have_digits = {_digits(n) for n in have}
+
+    total_new = 0
+    for name in assignees:
+        try:
+            hits = patentsview.search_by_assignee(name, api_key=api_key, since=since)
+        except ValueError as e:  # no key → dormant
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        except Exception as e:  # noqa: BLE001
+            print(f"  [{name}] search failed: {e}", file=sys.stderr)
+            continue
+        new = [h for h in hits if _digits(h["number"]) not in have_digits]
+        print(f"{name}: {len(hits)} filings since {since}, {len(new)} new")
+        for h in new:
+            print(f"  + {h['number']}  {h['title'][:70]}")
+        total_new += len(new)
+        if args.add and new:
+            for h in new:
+                if _add_via_source(h["number"]) == 0:
+                    have_digits.add(_digits(h["number"]))
+
+    print(f"\n{total_new} new patent(s) across {len(assignees)} assignee(s).")
+    return 0
+
+
+def _add_via_source(number: str) -> int:
+    """Fetch+store one patent via Google (keyless), for monitor --add."""
+    from scq.db.connection import connect
+
+    from .providers import google
+    from .store import upsert_patent
+
+    try:
+        patent = google.fetch_patent(number)
+    except Exception as e:  # noqa: BLE001
+        print(f"    (could not add {number}: {e})", file=sys.stderr)
+        return 1
+    conn = connect()
+    try:
+        upsert_patent(conn, patent)
+    finally:
+        conn.close()
+    return 0
+
+
+def _anthropic_llm(model: str):
+    """Return an (prompt -> reply) callable backed by the Anthropic SDK.
+
+    Returns None if the SDK isn't installed or no key is configured — the
+    caller then falls back to printing the prompt for the interactive
+    summarize-patent skill. Key resolves from the 'anthropic_api_key'
+    secret or the ANTHROPIC_API_KEY env var.
+    """
+    try:
+        import anthropic  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    from scq.config import secrets as secrets_mod
+
+    key = secrets_mod.get("anthropic_api_key")
+    if not key:
+        return None
+    client = anthropic.Anthropic(api_key=key)
+
+    def call(prompt: str) -> str:
+        resp = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return "".join(block.text for block in resp.content if getattr(block, "type", "") == "text")
+
+    return call
+
+
+def _cmd_summarize(args: argparse.Namespace) -> int:
+    from scq.db.connection import connect
+
+    from .store import get_patent, store_summary
+    from .summarize import build_summary_prompt, summarize_patent
+
+    info = parse_patent_number(args.number)
+    conn = connect()
+    try:
+        rec = get_patent(conn, info["canonical"])
+        if rec is None:
+            print(
+                f"error: {info['canonical']} not in the DB — fetch+process it first.",
+                file=sys.stderr,
+            )
+            return 1
+
+        if args.print_prompt:
+            print(build_summary_prompt(rec))
+            return 0
+
+        llm = _anthropic_llm(args.model)
+        if llm is None:
+            print(
+                "No Anthropic LLM available (install the SDK and set the "
+                "'anthropic_api_key' secret, or pass --print-prompt). For "
+                "interactive use, run the summarize-patent skill instead.\n",
+                file=sys.stderr,
+            )
+            print(build_summary_prompt(rec))
+            return 2
+
+        try:
+            fields = summarize_patent(rec, llm)
+        except Exception as e:  # noqa: BLE001
+            print(f"error: summarization failed: {e}", file=sys.stderr)
+            return 1
+        store_summary(conn, info["canonical"], **fields)
+    finally:
+        conn.close()
+
+    print(f"summarized {info['canonical']} ({', '.join(fields) or 'no fields'})")
+    for k, v in fields.items():
+        print(f"  {k}: {v[:100]}{'…' if len(v) > 100 else ''}")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scq patents", description="fetch and inspect patents")
     sub = parser.add_subparsers(dest="cmd", metavar="<command>")
@@ -177,6 +336,31 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument("number", help="patent number")
     p_show.add_argument("--json", action="store_true", help="emit the full record as JSON")
     p_show.set_defaults(func=_cmd_show)
+
+    p_sum = sub.add_parser(
+        "summarize", help="LLM-summarize a stored patent's claims into the summary fields"
+    )
+    p_sum.add_argument("number", help="patent number (must already be stored)")
+    p_sum.add_argument(
+        "--print-prompt",
+        action="store_true",
+        help="print the summary prompt instead of calling an LLM",
+    )
+    p_sum.add_argument(
+        "--model",
+        default="claude-sonnet-4-6",
+        help="Anthropic model id (default: claude-sonnet-4-6)",
+    )
+    p_sum.set_defaults(func=_cmd_summarize)
+
+    p_mon = sub.add_parser(
+        "monitor", help="find recent filings by tracked assignees (needs PatentsView key)"
+    )
+    p_mon.add_argument("--assignee", action="append", help="assignee org to track (repeatable)")
+    p_mon.add_argument("--days", type=int, default=90, help="look-back window in days (default 90)")
+    p_mon.add_argument("--add", action="store_true", help="fetch+store new patents (via Google)")
+    p_mon.add_argument("--api-key", help="PatentsView API key (overrides secret/env)")
+    p_mon.set_defaults(func=_cmd_monitor)
 
     return parser
 

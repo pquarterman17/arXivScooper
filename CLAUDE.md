@@ -260,6 +260,8 @@ Keywords and ranking parameters are **config-driven**, not hardcoded. The system
 
 **Tunable parameters:** `titleMultiplier` (title keyword hits score higher), `minScoreToInclude` (paper score threshold for digest inclusion).
 
+**Patent scoring** (`scq/patents/relevance.py`, `score_patent`) reuses the same config plus two patent-only maps: `cpcBoosts` (CPC-prefix → points, e.g. `G06N10`, `H10N60`) and `assigneeBoosts` (assignee substring → points, the patent analogue of `authorBoosts`). Patent keyword matching is **word-boundary** anchored (not substring) so acronyms like `MBE`/`TiN` don't false-match inside `number`/`destination`. `scq relevance test <patent-number>` scores a stored patent and explains the CPC/assignee/keyword matches. Other patent CLI: `scq patents summarize <num>` (LLM summary via Anthropic if keyed, else prints the prompt) and `scq patents monitor --assignee NAME` (recent-filings tracker; dormant until a PatentsView key is stored).
+
 **CLI commands for relevance:**
 ```bash
 scq relevance show           # active profiles, focus values, author boosts, keyword counts

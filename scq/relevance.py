@@ -170,6 +170,17 @@ def _cmd_show(args: argparse.Namespace) -> int:  # noqa: ARG001
     else:
         print("\nAuthor boosts: (none configured)")
 
+    cpc = cfg.get("cpcBoosts", {})
+    if cpc:
+        print(f"\nCPC boosts ({len(cpc)}) [patents]:")
+        for code, pts in sorted(cpc.items(), key=lambda x: -x[1]):
+            print(f"  {pts:+.0f}  {code}")
+    assignee = cfg.get("assigneeBoosts", {})
+    if assignee:
+        print(f"\nAssignee boosts ({len(assignee)}) [patents]:")
+        for name, pts in sorted(assignee.items(), key=lambda x: -x[1]):
+            print(f"  {pts:+.0f}  {name}")
+
     # Group effective keywords by profile
     kw_to_profiles = cfg.get("keywordToProfiles", {})
     by_profile: dict[str, list[tuple[str, float]]] = {}
@@ -382,6 +393,10 @@ def _cmd_test(args: argparse.Namespace) -> int:
             conn.close()
 
     if paper is None:
+        # Not a paper — maybe it's a stored patent (by number or title).
+        rc = _try_score_patent(query)
+        if rc is not None:
+            return rc
         # Treat the query as a synthetic title with empty abstract
         print(f"  (no DB match for {query!r} — scoring as a synthetic title)")
         paper = {"id": "synthetic", "title": query, "authors": "", "abstract": ""}
@@ -417,6 +432,62 @@ def _cmd_test(args: argparse.Namespace) -> int:
         print("\nAuthor boosts:")
         for name, pts in matched_authors:
             print(f"  {pts:+.0f}  matched '{name}'")
+    return 0
+
+
+def _try_score_patent(query: str) -> int | None:
+    """If `query` matches a stored patent, score it and print; else None."""
+    conn = _get_db_conn()
+    if conn is None:
+        return None
+    try:
+        has_patents = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='patents'"
+        ).fetchone()
+        if not has_patents:
+            return None
+        from scq.patents.store import get_patent
+
+        rec = get_patent(conn, query)
+        if rec is None:
+            row = conn.execute(
+                "SELECT number FROM patents WHERE LOWER(title) LIKE ? LIMIT 1",
+                (f"%{query.lower()}%",),
+            ).fetchone()
+            if row is not None:
+                rec = get_patent(conn, row["number"])
+        if rec is None:
+            return None
+    finally:
+        conn.close()
+
+    from scq.arxiv.search import _load_relevance_config, invalidate_relevance_cache
+    from scq.patents.relevance import score_patent
+
+    invalidate_relevance_cache()
+    cfg = _load_relevance_config()
+    raw = score_patent(rec, cfg)
+
+    print(f"\nPatent: {rec.get('number')} — {rec.get('title', '')}")
+    print(f"Assignee: {rec.get('assignee', '')}")
+    print(f"\nrelevance_score : {rec['relevance_score']:.1f}  (raw: {raw:.1f})")
+    print(f"minScoreToInclude: {cfg['minScoreToInclude']}")
+    included = rec["relevance_score"] >= cfg["minScoreToInclude"]
+    print(f"Would be included: {'yes' if included else 'NO (below floor)'}")
+    if rec["matched_cpc"]:
+        print("\nCPC boosts matched:")
+        for code in rec["matched_cpc"]:
+            print(f"  {cfg['cpcBoosts'][code]:+.0f}  {code}")
+    if rec["matched_assignees"]:
+        print("\nAssignee boosts matched:")
+        for name in rec["matched_assignees"]:
+            print(f"  {cfg['assigneeBoosts'][name]:+.0f}  {name}")
+    if rec["matched_keywords"]:
+        print(f"\nMatched keywords ({len(rec['matched_keywords'])}):")
+        for kw in rec["matched_keywords"]:
+            print(f"  {cfg['effectiveKeywords'].get(kw, 0):+.1f}  {kw!r}")
+    if not (rec["matched_cpc"] or rec["matched_assignees"] or rec["matched_keywords"]):
+        print("\nNo CPC / assignee / keyword signals matched.")
     return 0
 
 

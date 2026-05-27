@@ -24,6 +24,20 @@
         "type": "number"
       }
     },
+    "cpcBoosts": {
+      "type": "object",
+      "description": "Map of CPC/IPC classification-code prefixes to bonus point values added to a PATENT's score when any of its codes starts with the prefix (prefix match, so \"G06N10\" matches \"G06N10/40\"). Example: { \"G06N10\": 10, \"H10N60\": 9 }. Used only by patent scoring.",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "assigneeBoosts": {
+      "type": "object",
+      "description": "Map of patent-assignee name substrings (case-insensitive) to bonus point values added to a PATENT's score when its assignee matches. The patent analogue of authorBoosts. Example: { \"International Business Machines\": 6, \"Google\": 5 }.",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
     "profiles": {
       "type": "object",
       "description": "Named keyword groups. Each profile has a focus multiplier (0 = silent) and a keywords map (keyword string → integer weight, negative weights penalise).",

@@ -165,6 +165,11 @@ def list_patents(
     return out
 
 
+def existing_numbers(conn: sqlite3.Connection) -> set[str]:
+    """Return the set of patent numbers already stored (for dedup)."""
+    return {row[0] for row in conn.execute("SELECT number FROM patents").fetchall()}
+
+
 def get_patent(conn: sqlite3.Connection, number: str) -> dict | None:
     """Fetch one patent as a dict (JSON columns decoded), or None."""
     conn.row_factory = sqlite3.Row

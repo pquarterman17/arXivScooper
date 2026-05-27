@@ -103,6 +103,63 @@ def _headers(api_key: str) -> dict:
     }
 
 
+def build_assignee_search_request(
+    assignee: str, api_key: str, *, since: str | None = None, size: int = 50
+) -> tuple[str, dict]:
+    """Build the (url, headers) for a recent-filings-by-assignee query."""
+    conds: list[dict] = [{"assignees.assignee_organization": assignee}]
+    if since:
+        conds.append({"_gte": {"patent_date": since}})
+    q = json.dumps({"_and": conds} if len(conds) > 1 else conds[0])
+    f = json.dumps(["patent_id", "patent_title", "patent_date", "assignees.assignee_organization"])
+    o = json.dumps({"size": max(1, min(size, 1000))})
+    url = (
+        f"{_api_base()}/patent/?q={urllib.parse.quote(q)}"
+        f"&f={urllib.parse.quote(f)}&o={urllib.parse.quote(o)}"
+    )
+    return url, _headers(api_key)
+
+
+def parse_assignee_search(payload: dict) -> list[dict]:
+    """Shape a /patent/ search payload into lightweight result rows."""
+    out = []
+    for rec in payload.get("patents") or []:
+        assignees = rec.get("assignees") or []
+        out.append(
+            {
+                "number": rec.get("patent_id", ""),
+                "title": (rec.get("patent_title") or "").strip(),
+                "assignee": (assignees[0].get("assignee_organization") or "").strip()
+                if assignees
+                else "",
+                "grant_date": rec.get("patent_date", ""),
+            }
+        )
+    return out
+
+
+def search_by_assignee(
+    assignee: str,
+    *,
+    api_key: str,
+    since: str | None = None,
+    http: HttpFn | None = None,
+) -> list[dict]:
+    """Search PatentsView for recent filings by an assignee (needs API key).
+
+    Dormant until a key is stored — raises ValueError with instructions if
+    none is given, mirroring fetch_patent.
+    """
+    if not api_key:
+        raise ValueError(
+            "PatentsView requires an API key. Set the 'patentsview_api_key' "
+            "secret (scq config set-secret patentsview_api_key)."
+        )
+    do_http = http or _default_http
+    url, headers = build_assignee_search_request(assignee, api_key, since=since)
+    return parse_assignee_search(do_http(url, headers))
+
+
 # ─── response parsing (pure) ───
 
 

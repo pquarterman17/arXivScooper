@@ -3,6 +3,16 @@
   "titleMultiplier": 2.0,
   "minScoreToInclude": 5,
   "authorBoosts": {},
+  "cpcBoosts": {
+    "G06N10": 10,
+    "H10N60": 10,
+    "H10N69": 9,
+    "H03K19/195": 9,
+    "G06N10/40": 10,
+    "H01L39": 8,
+    "B82Y10": 6
+  },
+  "assigneeBoosts": {},
   "profiles": {
     "materials": {
       "focus": 1.0,

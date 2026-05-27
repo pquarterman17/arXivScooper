@@ -221,6 +221,11 @@ def _build_effective_config(cfg: dict) -> dict:
     author_boosts: dict[str, float] = {
         k: float(v) for k, v in (cfg.get("authorBoosts") or {}).items()
     }
+    # Patent-only boost maps (used by scq.patents.relevance.score_patent).
+    cpc_boosts: dict[str, float] = {k: float(v) for k, v in (cfg.get("cpcBoosts") or {}).items()}
+    assignee_boosts: dict[str, float] = {
+        k: float(v) for k, v in (cfg.get("assigneeBoosts") or {}).items()
+    }
 
     profiles: dict[str, dict] = cfg.get("profiles") or {}
     effective_keywords: dict[str, float] = {}
@@ -240,6 +245,8 @@ def _build_effective_config(cfg: dict) -> dict:
         "titleMultiplier": title_mult,
         "minScoreToInclude": min_score,
         "authorBoosts": author_boosts,
+        "cpcBoosts": cpc_boosts,
+        "assigneeBoosts": assignee_boosts,
         "effectiveKeywords": effective_keywords,
         "keywordToProfiles": keyword_to_profiles,
     }
@@ -251,6 +258,8 @@ def _fallback_effective_config() -> dict:
         "titleMultiplier": 2.0,
         "minScoreToInclude": 5,
         "authorBoosts": {},
+        "cpcBoosts": {},
+        "assigneeBoosts": {},
         "effectiveKeywords": dict(_FALLBACK_KEYWORDS),
         "keywordToProfiles": {kw: ["fallback"] for kw in _FALLBACK_KEYWORDS},
     }
