@@ -137,6 +137,26 @@ def test_add_unknown_source_400(running_server):
     assert exc.value.code == 400
 
 
+def test_get_single_patent(running_server):
+    port = running_server
+    _post(port, "/api/patents/add", {"number": "US10374134B2"})
+    status, body = _get(port, "/api/patents/get?number=US10374134B2")
+    assert status == 200
+    assert body["ok"] is True
+    # Full record includes claims + summary fields the list payload omits.
+    assert "claims" in body["patent"]
+    assert "plain_summary" in body["patent"]
+    assert body["patent"]["assignee"] == "International Business Machines"
+
+
+def test_get_missing_patent_404(running_server):
+    import urllib.error
+
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(running_server, "/api/patents/get?number=US999")
+    assert exc.value.code == 404
+
+
 def test_list_fts_filter(running_server):
     port = running_server
     _post(port, "/api/patents/add", {"number": "US10374134B2"})

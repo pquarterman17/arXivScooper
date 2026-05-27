@@ -92,6 +92,7 @@ import { loadPapersFromDB } from './init.js';
 import { togglePaper, toggleTag, clearTags, updateNotes } from './events.js';
 import { syncToSharedFolder, mergeSharedFile } from './collaboration.js';
 import { render, renderSidebar } from './library-table.js';
+import { renderPatentsView, togglePatentDetail, refreshPatentsView } from './patents-view.js';
 import { showSettings as showSettingsV2, closeSettings as closeSettingsV2 } from '../settings/main.js';
 import { bootstrapSearchConfig } from '../../core/search-config-bridge.js';
 
@@ -154,6 +155,9 @@ const BRIDGE = {
   loadPapersFromDB, togglePaper, toggleTag, clearTags, updateNotes,
   // Library-view rendering — boot block calls render() / renderSidebar()
   render, renderSidebar,
+  // Patents view (database-page browse). switchMainTab is wrapped inside
+  // patents-view.js itself (it must capture the boot-block original).
+  renderPatentsView, togglePatentDetail, refreshPatentsView,
   // Collaboration helpers — note the legacy `_syncToSharedFolder` alias
   _syncToSharedFolder: syncToSharedFolder,
   mergeSharedFile,
@@ -239,6 +243,9 @@ const ACTIONS = {
   citeCopySelected: () => window.citeCopySelected?.(),
   // ─ Graph tab
   renderGraph: () => window.renderGraph?.(),
+  // ─ Patents tab
+  togglePatentDetail: (el) => window.togglePatentDetail?.(el.dataset.number),
+  refreshPatentsView: () => window.refreshPatentsView?.(),
   // ─ Inbox tab
   inboxImportFile: () => window.inboxImportFile?.(),
   inboxImportAll: () => window.inboxImportAll?.(),

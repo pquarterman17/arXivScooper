@@ -91,6 +91,25 @@ export async function listPatents(opts = {}) {
 }
 
 /**
+ * Fetch one stored patent's full record (claims + summary fields).
+ *
+ * @param {string} number
+ * @param {object} [opts]
+ * @param {function} [opts.fetch]
+ * @returns {Promise<object>} the full patent record
+ */
+export async function getPatent(number, opts = {}) {
+  const fetchFn = opts.fetch ?? globalThis.fetch?.bind(globalThis);
+  if (!fetchFn) throw new Error('[services/patents] no fetch available');
+  const resp = await fetchFn(`/api/patents/get?number=${encodeURIComponent(number)}`);
+  const data = await _json(resp);
+  if (!resp.ok || !data.ok) {
+    throw new Error(data.error || `get failed (HTTP ${resp.status})`);
+  }
+  return data.patent;
+}
+
+/**
  * Keyword-search PatentsView via the /api/patents proxy. This is the
  * "wired but dormant" path: the proxy injects the API key server-side and
  * returns HTTP 503 until a key is stored, in which case we throw a clear

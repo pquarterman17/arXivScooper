@@ -74,6 +74,7 @@
   <button class="main-tab" data-action="switchMainTab" data-tab="inbox" id="mtab-inbox">Inbox <span class="tab-badge" id="inbox-badge" style="display:none">0</span></button>
   <button class="main-tab" data-action="switchMainTab" data-tab="cite" id="mtab-cite">Cite</button>
   <button class="main-tab" data-action="switchMainTab" data-tab="graph" id="mtab-graph">Graph</button>
+  <button class="main-tab" data-action="switchMainTab" data-tab="patents" id="mtab-patents">Patents</button>
 </div>
 
 <!-- === TAB 1: Library (original content) === -->
@@ -192,6 +193,21 @@
       <div class="inbox-empty">No papers in inbox. Import a digest to get started.</div>
     </div>
   </div>
+</div>
+
+<!-- === TAB 6: Patents === -->
+<div id="tab-patents" style="display:none">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin:8px 0 12px;">
+    <div style="font-size:13px; color:var(--text2);">
+      <span id="patents-count">0</span> stored patents. Click a card to see the plain-English
+      summary and independent claims. Add patents from the scraper's Patents tab.
+    </div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <input type="text" id="patents-filter" placeholder="Filter title / claims / summary..." style="font-size:12px; padding:4px 8px; width:220px;">
+      <button class="action-btn" data-action="refreshPatentsView">Refresh</button>
+    </div>
+  </div>
+  <div class="card-list" id="patents-list"></div>
 </div>
 
 <div id="modal-root"></div>

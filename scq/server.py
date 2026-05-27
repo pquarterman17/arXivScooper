@@ -297,6 +297,8 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/arxiv"):
             self._proxy_arxiv()
+        elif self.path.startswith("/api/patents/get"):
+            self._handle_patents_get()
         elif self.path.startswith("/api/patents/list"):
             self._handle_patents_list()
         elif self.path.startswith("/api/patents"):
@@ -499,6 +501,29 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
                 rec = store.get_patent(conn, patent.number)
             finally:
                 conn.close()
+            self._json_response(200, {"ok": True, "patent": rec})
+        except Exception as e:  # noqa: BLE001
+            self._json_response(500, {"ok": False, "error": str(e)})
+
+    def _handle_patents_get(self):
+        """Fetch one stored patent's full record. GET /api/patents/get?number=."""
+        try:
+            from scq.db.connection import connect
+            from scq.patents import store
+
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            number = (qs.get("number", [""])[0] or "").strip()
+            if not number:
+                self._json_response(400, {"ok": False, "error": "Missing 'number'"})
+                return
+            conn = connect()
+            try:
+                rec = store.get_patent(conn, number)
+            finally:
+                conn.close()
+            if rec is None:
+                self._json_response(404, {"ok": False, "error": f"No stored patent {number}"})
+                return
             self._json_response(200, {"ok": True, "patent": rec})
         except Exception as e:  # noqa: BLE001
             self._json_response(500, {"ok": False, "error": str(e)})

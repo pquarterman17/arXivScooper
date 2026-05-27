@@ -70,6 +70,8 @@ const EXPECTED_BRIDGE_KEYS = [
   'loadPapersFromDB', 'togglePaper', 'toggleTag', 'clearTags', 'updateNotes',
   // Library-view rendering
   'render', 'renderSidebar',
+  // Patents view (switchMainTab is wrapped inside patents-view.js itself)
+  'renderPatentsView', 'togglePatentDetail', 'refreshPatentsView',
   // Collaboration helpers (legacy underscored alias for syncToSharedFolder)
   '_syncToSharedFolder', 'mergeSharedFile',
 ];

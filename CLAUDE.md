@@ -302,8 +302,11 @@ patents, and a dormant PatentsView keyword search (shows a "set your key"
 message until the key is stored). It's backed by two server endpoints,
 `POST /api/patents/add` and `GET /api/patents/list` (fetch+store happen
 server-side; the browser can't run the ingest). Frontend lives in
-`src/services/patents.js` + `src/ui/scraper/patents-tab.js`. A richer
-Patents view on the database page is still TODO (`plans/patent-scraping.md`).
+`src/services/patents.js` + `src/ui/scraper/patents-tab.js`. The database
+page (`paper_database.html`) also has a **Patents main-tab** (filterable
+list → expandable detail with the summary fields + independent claims),
+in `src/ui/database/patents-view.js`, backed by `GET /api/patents/get`
+and `/api/patents/list`.
 
 After `process` (or the GUI add), use the **summarize-patent** skill to
 translate the claim legalese into three plain-English fields: `plain_summary` (what it does),

@@ -3,6 +3,7 @@ import {
   normalizePatentNumber,
   addPatent,
   listPatents,
+  getPatent,
   searchPatentsView,
   parsePatentsViewSearch,
 } from '../../services/patents.js';
@@ -73,6 +74,22 @@ describe('listPatents', () => {
       return res({ ok: true, patents: [] });
     });
     await listPatents({ fetch });
+  });
+});
+
+describe('getPatent', () => {
+  it('fetches the full record by number', async () => {
+    const fetch = vi.fn(async (url) => {
+      expect(url).toBe('/api/patents/get?number=US10374134B2');
+      return res({ ok: true, patent: { number: 'US10374134B2', claims: [], plain_summary: '' } });
+    });
+    const rec = await getPatent('US10374134B2', { fetch });
+    expect(rec.number).toBe('US10374134B2');
+  });
+
+  it('throws on a missing patent', async () => {
+    const fetch = vi.fn(async () => res({ ok: false, error: 'No stored patent US999' }, { ok: false, status: 404 }));
+    await expect(getPatent('US999', { fetch })).rejects.toThrow('No stored patent');
   });
 });
 
