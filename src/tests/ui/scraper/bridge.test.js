@@ -51,6 +51,9 @@ const EXPECTED_SCRAPER_BRIDGE = [
   'initState',
   // tabs
   'switchTab', 'updateInboxBadge', 'updateStats',
+  // patents-tab
+  'addPatent', 'addPatentNumber', 'renderPatentsList', 'searchPatents',
+  'refreshPatents',
 ];
 
 function listScraperFiles() {

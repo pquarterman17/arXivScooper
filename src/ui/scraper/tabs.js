@@ -23,7 +23,7 @@
  */
 
 export function switchTab(tab) {
-  const panels = ['search', 'inbox', 'quick', 'doi'];
+  const panels = ['search', 'inbox', 'quick', 'doi', 'patents'];
   for (const t of panels) {
     const panel = document.getElementById(`panel-${t}`);
     const btn = document.getElementById(`tab-${t}`);
@@ -32,6 +32,7 @@ export function switchTab(tab) {
   }
 
   if (tab === 'inbox') globalThis.renderInbox?.();
+  if (tab === 'patents') globalThis.renderPatentsList?.();
   if (tab === 'quick') {
     setTimeout(() => document.getElementById('quick-search-input')?.focus(), 100);
   }

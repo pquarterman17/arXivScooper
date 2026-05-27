@@ -297,6 +297,8 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/arxiv"):
             self._proxy_arxiv()
+        elif self.path.startswith("/api/patents/list"):
+            self._handle_patents_list()
         elif self.path.startswith("/api/patents"):
             self._proxy_patents()
         elif self.path.startswith("/api/crossref/search"):
@@ -317,6 +319,8 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_pdf_upload()
         elif self.path == "/api/save-db":
             self._handle_save_db()
+        elif self.path == "/api/patents/add":
+            self._handle_patents_add()
         elif self.path.startswith("/api/config/"):
             self._handle_config_post()
         elif self.path == "/api/test/db-path":
@@ -438,6 +442,88 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(f'{{"error": "Proxy error: {e}"}}'.encode())
+
+    def _handle_patents_add(self):
+        """Fetch a patent via a provider and store it. POST {number, source}.
+
+        Runs the same provider+store pipeline as `scq patents fetch
+        --process`, server-side, so the browser never needs the network or
+        the Python ingest. Default source is 'google' (keyless).
+        Returns {ok, patent: {...}} or {ok: false, error}.
+        """
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0 or content_length > 8192:
+                self._json_response(400, {"ok": False, "error": "Missing or oversized body"})
+                return
+            try:
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                self._json_response(400, {"ok": False, "error": f"Invalid JSON: {e}"})
+                return
+
+            number = (payload.get("number") or "").strip()
+            source = (payload.get("source") or "google").strip()
+            if not number:
+                self._json_response(400, {"ok": False, "error": "Missing 'number'"})
+                return
+            if source not in ("google", "patentsview"):
+                self._json_response(400, {"ok": False, "error": f"Unknown source: {source}"})
+                return
+
+            from scq.db.connection import connect
+            from scq.patents import store
+            from scq.patents.providers import google, patentsview
+
+            try:
+                if source == "patentsview":
+                    from scq.config import secrets as _secrets_mod
+
+                    api_key = _secrets_mod.get("patentsview_api_key")
+                    patent = patentsview.fetch_patent(number, api_key=api_key)
+                else:
+                    patent = google.fetch_patent(number)
+            except ValueError as e:  # missing key / bad number
+                self._json_response(400, {"ok": False, "error": str(e)})
+                return
+            except LookupError as e:  # no such patent
+                self._json_response(404, {"ok": False, "error": str(e)})
+                return
+            except Exception as e:  # noqa: BLE001 — network/parse
+                self._json_response(502, {"ok": False, "error": f"Fetch failed: {e}"})
+                return
+
+            conn = connect()
+            try:
+                store.upsert_patent(conn, patent)
+                rec = store.get_patent(conn, patent.number)
+            finally:
+                conn.close()
+            self._json_response(200, {"ok": True, "patent": rec})
+        except Exception as e:  # noqa: BLE001
+            self._json_response(500, {"ok": False, "error": str(e)})
+
+    def _handle_patents_list(self):
+        """List stored patents. GET /api/patents/list?q=<fts>&limit=<n>."""
+        try:
+            from scq.db.connection import connect
+            from scq.patents import store
+
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            query = (qs.get("q", [""])[0] or "").strip() or None
+            try:
+                limit = int(qs.get("limit", ["200"])[0])
+            except ValueError:
+                limit = 200
+
+            conn = connect()
+            try:
+                patents = store.list_patents(conn, query=query, limit=limit)
+            finally:
+                conn.close()
+            self._json_response(200, {"ok": True, "patents": patents})
+        except Exception as e:  # noqa: BLE001
+            self._json_response(500, {"ok": False, "error": str(e)})
 
     def _proxy_crossref(self):
         """Forward request to CrossRef API with proper headers.

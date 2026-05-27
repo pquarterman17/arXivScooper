@@ -125,6 +125,46 @@ def store_summary(
     return cur.rowcount > 0
 
 
+def list_patents(
+    conn: sqlite3.Connection, *, query: str | None = None, limit: int = 200
+) -> list[dict]:
+    """List stored patents, newest first, optionally filtered by FTS query.
+
+    A non-empty ``query`` runs against ``patents_fts`` (title/abstract/claims/
+    summary); otherwise all patents are returned. The heavy text columns
+    (claims, abstract) are omitted from the list payload — callers fetch the
+    full record via :func:`get_patent` when a patent is opened.
+    """
+    limit = max(1, min(int(limit), 1000))
+    conn.row_factory = sqlite3.Row
+    cols = (
+        "number, title, assignee, short_inventors, filing_date, grant_date, "
+        "cpc_codes, source, plain_summary, date_added"
+    )
+    if query and query.strip():
+        sql = (
+            f"SELECT {cols} FROM patents WHERE number IN "
+            "(SELECT number FROM patents_fts WHERE patents_fts MATCH ?) "
+            "ORDER BY date_added DESC, grant_date DESC LIMIT ?"
+        )
+        params: tuple = (query.strip(), limit)
+    else:
+        sql = f"SELECT {cols} FROM patents ORDER BY date_added DESC, grant_date DESC LIMIT ?"
+        params = (limit,)
+    rows = conn.execute(sql, params).fetchall()
+    out = []
+    for row in rows:
+        rec = dict(row)
+        if isinstance(rec.get("cpc_codes"), str):
+            try:
+                rec["cpc_codes"] = json.loads(rec["cpc_codes"])
+            except (json.JSONDecodeError, TypeError):
+                rec["cpc_codes"] = []
+        rec["has_summary"] = bool(rec.get("plain_summary"))
+        out.append(rec)
+    return out
+
+
 def get_patent(conn: sqlite3.Connection, number: str) -> dict | None:
     """Fetch one patent as a dict (JSON columns decoded), or None."""
     conn.row_factory = sqlite3.Row

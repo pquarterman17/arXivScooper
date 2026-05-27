@@ -296,8 +296,17 @@ Two providers, selected with `--source` (both converge on the canonical
   Base overridable via `SCQ_PATENTSVIEW_API_BASE` (see the migration note
   in `plans/patent-scraping.md`).
 
-After `process`, use the **summarize-patent** skill to translate the claim
-legalese into three plain-English fields: `plain_summary` (what it does),
+**GUI:** the scraper page (`paper_scraper.html`) has a **Patents tab** —
+fetch-by-number (keyless Google), a filterable browse list of stored
+patents, and a dormant PatentsView keyword search (shows a "set your key"
+message until the key is stored). It's backed by two server endpoints,
+`POST /api/patents/add` and `GET /api/patents/list` (fetch+store happen
+server-side; the browser can't run the ingest). Frontend lives in
+`src/services/patents.js` + `src/ui/scraper/patents-tab.js`. A richer
+Patents view on the database page is still TODO (`plans/patent-scraping.md`).
+
+After `process` (or the GUI add), use the **summarize-patent** skill to
+translate the claim legalese into three plain-English fields: `plain_summary` (what it does),
 `protected_scope` (a plain reading of the independent claims = the real
 legal scope), and `prior_art_note` (what it builds on). CPC/IPC codes are
 stored but not yet scored — relevance scoring is Phase 2.

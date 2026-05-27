@@ -58,6 +58,7 @@
       <button class="tab" data-action="switchScraperTab" data-tab="inbox" id="tab-inbox">Inbox <span class="badge" id="inbox-badge" style="display:none">0</span></button>
       <button class="tab" data-action="switchScraperTab" data-tab="quick" id="tab-quick">Quick Search</button>
       <button class="tab" data-action="switchScraperTab" data-tab="doi" id="tab-doi">DOI Lookup</button>
+      <button class="tab" data-action="switchScraperTab" data-tab="patents" id="tab-patents">Patents</button>
     </div>
 
     <!-- ── Search Tab ── -->
@@ -168,6 +169,49 @@
       </div>
       <div class="status" id="doi-status"></div>
       <div id="doi-result"></div>
+    </div>
+
+    <!-- ── Patents Tab ── -->
+    <div id="panel-patents" style="display:none">
+      <div class="search-panel">
+        <div style="font-size:13px; color:var(--text2); margin-bottom:12px;">
+          Fetch a patent by number or Google Patents URL and add it to your library.
+          Google is keyless and works immediately; PatentsView keyword search needs an API key.
+        </div>
+        <div class="search-row">
+          <input type="text" id="patent-input" placeholder="e.g., US10374134B2 or https://patents.google.com/patent/US10374134B2" data-action="addPatentOnEnter">
+          <div class="filter-group">
+            <label>Source:</label>
+            <select id="patent-source">
+              <option value="google">Google (keyless)</option>
+              <option value="patentsview">PatentsView (needs key)</option>
+            </select>
+          </div>
+          <button class="btn" id="patent-add-btn" data-action="addPatent">Fetch &amp; Add</button>
+        </div>
+      </div>
+      <div class="status" id="patent-status"></div>
+
+      <!-- Keyword search (PatentsView; dormant until a key is stored) -->
+      <details class="search-panel" style="margin-top:12px">
+        <summary style="cursor:pointer; font-size:13px; color:var(--text2)">Keyword search (PatentsView)</summary>
+        <div class="search-row" style="margin-top:10px">
+          <input type="text" id="patent-search-input" placeholder="e.g., tunable coupler transmon readout" data-action="searchPatentsOnEnter">
+          <button class="btn btn-outline" id="patent-search-btn" data-action="searchPatents">Search</button>
+        </div>
+        <div class="status" id="patent-search-status"></div>
+        <div class="card-list" id="patent-search-results"></div>
+      </details>
+
+      <!-- Stored patents (browse) -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin:16px 0 8px;">
+        <div style="font-size:13px; color:var(--text2);">Stored patents</div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="text" id="patent-filter" placeholder="Filter..." style="font-size:12px; padding:3px 8px; width:160px;">
+          <button class="btn btn-sm btn-outline" data-action="refreshPatents">Refresh</button>
+        </div>
+      </div>
+      <div class="card-list" id="patent-list"></div>
     </div>
   </div>
 </div>

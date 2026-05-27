@@ -305,6 +305,29 @@ def test_store_summary_noop_returns_false(conn):
     assert store.store_summary(conn, "US10374134B2") is False
 
 
+def test_list_patents_returns_summary_lite_rows(conn):
+    store.upsert_patent(conn, _sample_patent())
+    rows = store.list_patents(conn)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["number"] == "US10374134B2"
+    assert r["has_summary"] is False
+    assert isinstance(r["cpc_codes"], list)
+    assert "claims" not in r  # heavy columns omitted from list payload
+
+
+def test_list_patents_fts_query(conn):
+    store.upsert_patent(conn, _sample_patent())
+    assert len(store.list_patents(conn, query="tantalum")) == 1
+    assert store.list_patents(conn, query="graphene") == []
+
+
+def test_list_patents_reflects_summary(conn):
+    store.upsert_patent(conn, _sample_patent())
+    store.store_summary(conn, "US10374134B2", plain_summary="A tantalum transmon.")
+    assert store.list_patents(conn)[0]["has_summary"] is True
+
+
 def test_fts_search_finds_patent(conn):
     store.upsert_patent(conn, _sample_patent())
     hits = conn.execute(

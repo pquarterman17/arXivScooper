@@ -12,6 +12,7 @@ import './doi-lookup.js';
 import './inbox-render.js';
 import './quick-search.js';
 import './saved-queries.js';
+import './patents-tab.js';
 import { bootstrapSearchConfig } from '../../core/search-config-bridge.js';
 
 /**
@@ -62,6 +63,12 @@ const ACTIONS = {
 
   // ─ DOI Lookup tab
   doDoiLookup: () => window.doDoiLookup?.(),
+
+  // ─ Patents tab
+  addPatent: () => window.addPatent?.(),
+  addPatentNumber: (el) => window.addPatentNumber?.(el.dataset.number),
+  searchPatents: () => window.searchPatents?.(),
+  refreshPatents: () => window.refreshPatents?.(),
 
   // ─ Inbox tab
   approveAll: () => window.approveAll?.(),
