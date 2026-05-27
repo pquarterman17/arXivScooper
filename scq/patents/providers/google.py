@@ -24,6 +24,7 @@ routed elsewhere if needed.
 from __future__ import annotations
 
 import re
+import urllib.error
 from collections.abc import Callable
 from html.parser import HTMLParser
 
@@ -109,6 +110,19 @@ _ABSTRACT_SECTION_RE = re.compile(
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t\r\f\v]+")
 
+# CPC/IPC classification codes are rendered as <span itemprop="Code">G06F16/951</span>.
+# Google lists the whole hierarchy (G, G06, G06F, G06F16/00, ...); keep only the
+# full leaf codes (those with a slash, e.g. H10N60/12, G06N10/40).
+_CPC_RE = re.compile(r'itemprop=["\']Code["\']\s*>\s*([A-H]\d\d[A-Z]\d*/\d+)\s*<', re.I)
+
+
+def _parse_cpc(html: str) -> list[str]:
+    out: list[str] = []
+    for code in _CPC_RE.findall(html):
+        if code not in out:
+            out.append(code)
+    return out
+
 
 def _strip_tags(html: str) -> str:
     text = _TAG_RE.sub(" ", html)
@@ -154,14 +168,26 @@ def parse_html(html: str, *, number_info: dict) -> Patent:
     assignees = _collect_meta(mp, "DC.contributor", "assignee")
     assignee = assignees[0] if assignees else ""
 
-    filing = _first(mp, "DC.date", "dateApplicationFiling") or _first(mp, "DC.date", "dateFiling")
-    grant = _first(mp, "DC.date", "datePublication") or _first(mp, "DC.date", "dateGranted")
+    # Google's real scheme values are "dateSubmitted" (filing) and "issue"
+    # (grant); keep the older guesses as fallbacks in case the markup varies.
+    filing = (
+        _first(mp, "DC.date", "dateSubmitted")
+        or _first(mp, "DC.date", "dateApplicationFiling")
+        or _first(mp, "DC.date", "dateFiling")
+    )
+    grant = (
+        _first(mp, "DC.date", "issue")
+        or _first(mp, "DC.date", "datePublication")
+        or _first(mp, "DC.date", "dateGranted")
+    )
 
     abstract = _first(mp, "DC.description") or mp.simple.get("description", "")
     if not abstract:
         am = _ABSTRACT_SECTION_RE.search(html)
         if am:
             abstract = _strip_tags(am.group(1))
+
+    cpc_codes = _parse_cpc(html)
 
     claims = _parse_claims(html)
     # No explicit independence flags in scraped claims → use the text heuristic.
@@ -183,6 +209,7 @@ def parse_html(html: str, *, number_info: dict) -> Patent:
         filing_date=filing.strip(),
         grant_date=grant.strip(),
         pub_date=grant.strip(),
+        cpc_codes=cpc_codes,
         claims=claims,
         url=PATENT_URL.format(number=number_info["canonical"]),
         source=SOURCE,
@@ -213,7 +240,15 @@ def fetch_patent(number: str, *, http: HttpFn | None = None, **_ignored) -> Pate
     do_http = http or _default_http
     info = parse_patent_number(number)
     url, headers = build_request(number)
-    html = do_http(url, headers)
+    try:
+        html = do_http(url, headers)
+    except urllib.error.HTTPError as e:
+        # A missing patent page is a 404 from Google — surface it as "no such
+        # patent" (LookupError → HTTP 404 at the API) rather than a generic
+        # fetch failure (502).
+        if e.code == 404:
+            raise LookupError(f"Google Patents has no page for {number!r} (HTTP 404)") from e
+        raise
     patent = parse_html(html, number_info=info)
     if not patent.title:
         raise LookupError(

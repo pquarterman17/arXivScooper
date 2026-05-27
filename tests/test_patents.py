@@ -193,15 +193,22 @@ def test_fetch_patent_raises_on_empty_result():
 
 from scq.patents.providers import google  # noqa: E402
 
+# Markup mirrors a real patents.google.com page (validated against US6285999
+# on 2026-05-26): date schemes are "dateSubmitted"/"issue", and CPC codes
+# render as <span itemprop="Code"> with the full hierarchy listed.
 _GOOGLE_HTML = """<html><head>
 <meta name="DC.title" content="Superconducting qubit with tantalum">
 <meta scheme="inventor" name="DC.contributor" content="Jay Gambetta">
 <meta scheme="inventor" name="DC.contributor" content="Jerry Chow">
 <meta scheme="assignee" name="DC.contributor" content="International Business Machines">
-<meta scheme="dateApplicationFiling" name="DC.date" content="2017-01-10">
-<meta scheme="datePublication" name="DC.date" content="2019-08-06">
+<meta scheme="dateSubmitted" name="DC.date" content="2017-01-10">
+<meta scheme="issue" name="DC.date" content="2019-08-06">
 <meta name="DC.description" content="A qubit comprising a tantalum capacitor pad.">
 </head><body>
+<ul><li><span itemprop="Code">H</span></li>
+<li><span itemprop="Code">H10</span></li>
+<li><span itemprop="Code">H10N60/12</span></li>
+<li><span itemprop="Code">G06N10/40</span></li></ul>
 <section itemprop="claims"><div class="claim">1. A superconducting qubit comprising a tantalum pad.
 2. The qubit of claim 1 wherein the pad is alpha-phase.</div></section>
 </body></html>"""
@@ -225,6 +232,14 @@ def test_google_parse_html_biblio():
     assert p.source == "google"
 
 
+def test_google_parse_html_extracts_full_cpc_codes():
+    info = parse_patent_number("US10374134B2")
+    p = google.parse_html(_GOOGLE_HTML, number_info=info)
+    # Only full leaf codes (with a slash); the bare "H"/"H10" hierarchy rows
+    # are skipped.
+    assert p.cpc_codes == ["H10N60/12", "G06N10/40"]
+
+
 def test_google_parse_html_claims_and_independence():
     info = parse_patent_number("US10374134B2")
     p = google.parse_html(_GOOGLE_HTML, number_info=info)
@@ -243,6 +258,16 @@ def test_google_fetch_patent_with_injected_http():
 def test_google_fetch_patent_raises_when_unparseable():
     with pytest.raises(LookupError):
         google.fetch_patent("US10374134B2", http=lambda u, h: "<html><body>nope</body></html>")
+
+
+def test_google_fetch_translates_404_to_lookup_error():
+    import urllib.error
+
+    def http_404(url, headers):
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    with pytest.raises(LookupError):
+        google.fetch_patent("US00000000B2", http=http_404)
 
 
 def test_google_fetch_ignores_api_key_kwarg():
