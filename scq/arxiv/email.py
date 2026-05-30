@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -108,9 +109,15 @@ def _load_email_recipients():
             except (json.JSONDecodeError, KeyError):
                 pass
 
-    # 3. SCQ_EMAIL_TO env var (used in CI when no user_config override is checked in)
+    # 3. SCQ_EMAIL_TO env var (used in CI when no user_config override is
+    #    checked in). Supports a comma- or semicolon-separated list so the
+    #    nightly GitHub-hosted run — which never sees the gitignored
+    #    digest.json — can still reach every recipient, not just one.
     if not recipients and EMAIL_TO:
-        recipients = [{"email": EMAIL_TO, "name": "", "frequency": "daily"}]
+        for addr in re.split(r"[,;]", EMAIL_TO):
+            addr = addr.strip()
+            if addr:
+                recipients.append({"email": addr, "name": "", "frequency": "daily"})
     return recipients
 
 

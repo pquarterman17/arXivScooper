@@ -99,7 +99,8 @@ def test_weekend_lookback_extends_on_monday(monkeypatch):
     fake = type("FakeDT", (), {})()
     fake.weekday = lambda: 0  # Monday
     monkeypatch.setattr(
-        digest_mod, "datetime",
+        digest_mod,
+        "datetime",
         type("D", (), {"now": staticmethod(lambda: fake)}),
     )
     days, note = digest_mod.compute_effective_days_back(2)
@@ -111,7 +112,8 @@ def test_weekend_lookback_extends_on_sunday(monkeypatch):
     fake = type("FakeDT", (), {})()
     fake.weekday = lambda: 6
     monkeypatch.setattr(
-        digest_mod, "datetime",
+        digest_mod,
+        "datetime",
         type("D", (), {"now": staticmethod(lambda: fake)}),
     )
     days, note = digest_mod.compute_effective_days_back(1)
@@ -123,7 +125,8 @@ def test_weekend_lookback_no_change_on_weekday(monkeypatch):
     fake = type("FakeDT", (), {})()
     fake.weekday = lambda: 2  # Wednesday
     monkeypatch.setattr(
-        digest_mod, "datetime",
+        digest_mod,
+        "datetime",
         type("D", (), {"now": staticmethod(lambda: fake)}),
     )
     days, note = digest_mod.compute_effective_days_back(3)
@@ -136,7 +139,8 @@ def test_weekend_lookback_keeps_max(monkeypatch):
     fake = type("FakeDT", (), {})()
     fake.weekday = lambda: 0  # Monday
     monkeypatch.setattr(
-        digest_mod, "datetime",
+        digest_mod,
+        "datetime",
         type("D", (), {"now": staticmethod(lambda: fake)}),
     )
     days, _ = digest_mod.compute_effective_days_back(7)
@@ -149,8 +153,17 @@ def test_weekend_lookback_keeps_max(monkeypatch):
 def test_mock_papers_have_required_fields():
     papers = digest_mod.generate_mock_papers()
     assert len(papers) >= 2
-    required = {"id", "title", "authors", "short_authors", "abstract", "published",
-                "categories", "pdf_url", "abs_url"}
+    required = {
+        "id",
+        "title",
+        "authors",
+        "short_authors",
+        "abstract",
+        "published",
+        "categories",
+        "pdf_url",
+        "abs_url",
+    }
     for p in papers:
         assert required.issubset(p.keys()), f"missing fields in {p['id']}"
 
@@ -173,6 +186,7 @@ def isolated_repo_root(monkeypatch, tmp_path):
     """Point SCQ_REPO_ROOT at a fresh tmp_path and refresh the paths cache
     both before and after the test, so other tests see the real repo root."""
     from scq.config.paths import refresh as _paths_refresh
+
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SCQ_REPO_ROOT", str(tmp_path))
     _paths_refresh()
@@ -190,7 +204,19 @@ def test_load_email_recipients_falls_back_to_env_var(isolated_repo_root, monkeyp
     assert any(r["email"] == "fallback@example.com" for r in recipients)
 
 
-def test_load_email_recipients_returns_empty_when_nothing_configured(isolated_repo_root, monkeypatch):
+def test_load_email_recipients_splits_env_var_list(isolated_repo_root, monkeypatch):
+    """SCQ_EMAIL_TO accepts a comma/semicolon list so the CI nightly run
+    (which never sees the gitignored digest.json) can reach every address."""
+    monkeypatch.setattr(email_mod, "EMAIL_TO", "a@x.com, b@y.com;c@z.com")
+    monkeypatch.setattr(email_mod, "BASE_DIR", str(isolated_repo_root))
+    recipients = email_mod._load_email_recipients()
+    assert [r["email"] for r in recipients] == ["a@x.com", "b@y.com", "c@z.com"]
+    assert all(r["frequency"] == "daily" for r in recipients)
+
+
+def test_load_email_recipients_returns_empty_when_nothing_configured(
+    isolated_repo_root, monkeypatch
+):
     monkeypatch.setattr(email_mod, "EMAIL_TO", "")
     monkeypatch.setattr(email_mod, "BASE_DIR", str(isolated_repo_root))
     recipients = email_mod._load_email_recipients()
@@ -254,9 +280,15 @@ def test_apply_digest_filters_handles_min_score_none():
 def test_load_digest_config_treats_null_in_user_json_as_default(monkeypatch):
     """Bug-hunter #1 (root cause): a hand-edited user_config with null
     values must fall back to defaults rather than passing None through."""
+
     class FakeResult:
-        data = {"minRelevanceScore": None, "maxPapers": None,
-                "lookbackDays": None, "includeSources": None}
+        data = {
+            "minRelevanceScore": None,
+            "maxPapers": None,
+            "lookbackDays": None,
+            "includeSources": None,
+        }
+
     monkeypatch.setattr("scq.config.user.load_config", lambda _d: FakeResult())
     cfg = digest_mod._load_digest_config()
     assert cfg["minRelevanceScore"] == digest_mod._DIGEST_DEFAULTS["minRelevanceScore"]
@@ -268,6 +300,7 @@ def test_load_digest_config_treats_null_in_user_json_as_default(monkeypatch):
 def test_load_digest_config_falls_back_when_loader_throws(monkeypatch):
     def boom(_domain):
         raise RuntimeError("config unreadable")
+
     monkeypatch.setattr("scq.config.user.load_config", boom)
     cfg = digest_mod._load_digest_config()
     assert cfg["lookbackDays"] == digest_mod._DIGEST_DEFAULTS["lookbackDays"]
@@ -276,12 +309,19 @@ def test_load_digest_config_falls_back_when_loader_throws(monkeypatch):
 
 def test_load_digest_config_pulls_from_loader(monkeypatch):
     class FakeResult:
-        data = {"lookbackDays": 7, "maxPapers": 25, "minRelevanceScore": 5,
-                "includeSources": ["arxiv", "prl"]}
+        data = {
+            "lookbackDays": 7,
+            "maxPapers": 25,
+            "minRelevanceScore": 5,
+            "includeSources": ["arxiv", "prl"],
+        }
+
     monkeypatch.setattr("scq.config.user.load_config", lambda _d: FakeResult())
     cfg = digest_mod._load_digest_config()
     assert cfg == {
-        "lookbackDays": 7, "maxPapers": 25, "minRelevanceScore": 5,
+        "lookbackDays": 7,
+        "maxPapers": 25,
+        "minRelevanceScore": 5,
         "includeSources": ["arxiv", "prl"],
     }
 
@@ -289,6 +329,7 @@ def test_load_digest_config_pulls_from_loader(monkeypatch):
 def test_load_search_categories_uses_loader_result(monkeypatch):
     class FakeResult:
         data = {"arxivCategories": ["quant-ph", "cond-mat.supr-con"]}
+
     monkeypatch.setattr("scq.config.user.load_config", lambda _d: FakeResult())
     cats = digest_mod._load_search_categories()
     assert cats == ["quant-ph", "cond-mat.supr-con"]
@@ -297,6 +338,7 @@ def test_load_search_categories_uses_loader_result(monkeypatch):
 def test_load_search_categories_falls_back_when_empty(monkeypatch):
     class FakeResult:
         data = {"arxivCategories": []}  # empty list = use defaults
+
     monkeypatch.setattr("scq.config.user.load_config", lambda _d: FakeResult())
     cats = digest_mod._load_search_categories()
     assert cats == list(search_mod.ARXIV_CATEGORIES)
@@ -305,26 +347,37 @@ def test_load_search_categories_falls_back_when_empty(monkeypatch):
 def test_load_search_categories_falls_back_when_loader_throws(monkeypatch):
     def boom(_domain):
         raise RuntimeError("config unreadable")
+
     monkeypatch.setattr("scq.config.user.load_config", boom)
     cats = digest_mod._load_search_categories()
     assert cats == list(search_mod.ARXIV_CATEGORIES)
 
 
-def test_main_uses_config_categories_when_cli_omits_flags(monkeypatch, tmp_path, isolated_repo_root):
+def test_main_uses_config_categories_when_cli_omits_flags(
+    monkeypatch, tmp_path, isolated_repo_root
+):
     """Sanity-check that main() actually plumbs config values into fetch_arxiv_papers
     when the CLI does not specify --days. Uses --test so no network fires."""
     captured = {}
 
     class FakeResult:
-        data = {"lookbackDays": 5, "maxPapers": 1, "minRelevanceScore": 0,
-                "includeSources": [], "arxivCategories": ["quant-ph"]}
+        data = {
+            "lookbackDays": 5,
+            "maxPapers": 1,
+            "minRelevanceScore": 0,
+            "includeSources": [],
+            "arxivCategories": ["quant-ph"],
+        }
+
     monkeypatch.setattr("scq.config.user.load_config", lambda _d: FakeResult())
     monkeypatch.setattr(digest_mod, "send_email_digest", lambda *_a, **_k: None)
     real_apply = digest_mod._apply_digest_filters
+
     def spy_apply(papers, *, min_score, max_count):
         captured["min_score"] = min_score
         captured["max_count"] = max_count
         return real_apply(papers, min_score=min_score, max_count=max_count)
+
     monkeypatch.setattr(digest_mod, "_apply_digest_filters", spy_apply)
     monkeypatch.setattr(digest_mod, "DIGEST_DIR", str(tmp_path))
 
@@ -340,10 +393,13 @@ def test_main_uses_config_categories_when_cli_omits_flags(monkeypatch, tmp_path,
 def test_scq_digest_subcommand_dispatches(monkeypatch):
     """`scq digest --test --no-email` should reach scq.arxiv.digest.main."""
     received = []
+
     def fake_main(argv=None):
         received.append(list(argv or []))
+
     monkeypatch.setattr("scq.arxiv.digest.main", fake_main)
     from scq.cli import main as cli_main
+
     rc = cli_main(["digest", "--test", "--no-email", "--days", "5"])
     assert rc == 0
     assert received[0] == ["--test", "--no-email", "--days", "5"]
