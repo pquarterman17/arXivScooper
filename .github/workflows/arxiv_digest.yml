@@ -2,11 +2,13 @@ name: SCQ arXiv Daily Digest
 
 on:
   schedule:
-    # Target: ready in inbox by ~7 AM US Eastern.
-    # 10:45 UTC = 6:45 AM EDT / 5:45 AM EST. GitHub Actions scheduled
-    # workflows typically lag 15-60 min, so EDT arrival lands near 7 AM.
-    # In EST (winter) it'll arrive closer to 6 AM — still before work.
-    - cron: '45 10 * * *'
+    # Same-day delivery: arXiv announces new submissions ~20:00 US Eastern
+    # (Sun–Thu), which reaches the API around 00:00–01:00 UTC. Running at
+    # 04:00 UTC fires safely AFTER that announcement, so the digest covers
+    # the batch that went live the same evening rather than catching it the
+    # next morning. 04:00 UTC = 11 PM EST (winter) / 12 AM EDT (summer);
+    # GitHub Actions cron lag (15–60 min) keeps it in the late-evening slot.
+    - cron: '0 4 * * *'
   workflow_dispatch:
     inputs:
       days_back:
