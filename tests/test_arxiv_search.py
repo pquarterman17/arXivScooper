@@ -367,8 +367,16 @@ def test_paper_dict_has_canonical_shape():
     assert p["abs_url"] == "https://arxiv.org/abs/2099.00001"
 
 
-def test_returns_empty_list_when_combined_and_all_per_category_fail():
-    """All requests return invalid XML → empty list, no exception."""
+def test_raises_fetch_error_when_combined_and_all_per_category_fail():
+    """All requests return unparseable XML → ArxivFetchError, not [].
+
+    Getting bytes we cannot parse means we have ZERO usable information
+    about what papers exist — a fetch *failure*, indistinguishable in
+    outcome from a network outage. It must NOT be reported as "no new
+    papers today" (which previously made the digest mail an empty email
+    on a transient arXiv hiccup, then re-surface the missed papers the
+    next day). See scq.arxiv.digest.main's ArxivFetchError handling.
+    """
     def fake_urlopen(req, timeout=None):
         resp = MagicMock()
         resp.read.return_value = b"<not-xml>"
@@ -377,6 +385,20 @@ def test_returns_empty_list_when_combined_and_all_per_category_fail():
         return resp
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        with pytest.raises(arxiv_search.ArxivFetchError):
+            arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
+
+
+def test_valid_empty_feed_returns_empty_list_without_raising():
+    """A successful response with zero entries is a genuine empty result.
+
+    arXiv answered and the feed parsed — it simply had nothing new in the
+    window. This must return [] (not raise) so a real quiet day flows
+    through normally and the digest skips the email rather than failing.
+    """
+    with patch.object(
+        arxiv_search.urllib.request, "urlopen", _make_urlopen_mock(_atom_response([]))
+    ):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
 
     assert papers == []

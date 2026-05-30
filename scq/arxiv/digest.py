@@ -18,10 +18,12 @@ import sys
 from datetime import datetime, timezone
 
 from scq.arxiv import search as _search
+from scq.arxiv import state as _state
 from scq.arxiv.email import send_email_digest
 from scq.arxiv.render import generate_html_digest
 from scq.arxiv.search import (
     ARXIV_CATEGORIES,
+    ArxivFetchError,
     fetch_arxiv_papers,
     rank_papers,
 )
@@ -329,24 +331,55 @@ def main(argv=None):
     if min_score:
         print(f"  Min relevance: {min_score}")
 
-    # Fetch papers
+    # Fetch papers. A fetch *failure* (rate-limit, timeout, 5xx, budget
+    # exhausted) is NOT the same as "arXiv had nothing new" — the former
+    # must fail the run, not mail a misleading empty digest. See the
+    # ArxivFetchError handling below.
     if args.test:
         print("\n  Using mock data for testing...")
         papers = generate_mock_papers()
     else:
         print("\nFetching from arXiv API...")
-        papers = fetch_arxiv_papers(
-            categories,
-            days_back=days_back,
-            max_results=args.max_results,
-        )
+        try:
+            papers = fetch_arxiv_papers(
+                categories,
+                days_back=days_back,
+                max_results=args.max_results,
+            )
+        except ArxivFetchError as exc:
+            print(
+                f"ERROR: arXiv fetch failed - refusing to send an empty digest: {exc}",
+                file=sys.stderr,
+            )
+            _write_github_step_summary(
+                digest_date=digest_date,
+                n_fetched=0,
+                n_relevant=0,
+                n_digest=0,
+                email_status="failed",
+                artifact_run_id=os.environ.get("GITHUB_RUN_ID", ""),
+            )
+            sys.exit(2)
 
-    if not papers:
-        print("\nNo new papers found - sending empty digest so the run is visible.")
-        papers = []
-    else:
+    if papers:
         print(f"\nRanking {len(papers)} papers...")
         papers = rank_papers(papers)
+
+    # Cross-run dedup: drop papers already emailed by a previous run. This
+    # is what lets the workflow use a wide, overlapping lookback window
+    # (so a failed/empty day is always recovered) without re-emailing the
+    # same papers. Skipped in --test so the suite never touches the
+    # committed state file.
+    sent_ids = {}
+    if not args.test:
+        sent_ids = _state.load_sent_ids()
+        before_dedup = len(papers)
+        papers = _state.filter_unsent(papers, sent_ids)
+        if before_dedup != len(papers):
+            print(
+                f"  Dedup dropped {before_dedup - len(papers)} paper(s) "
+                f"already emailed in a previous run"
+            )
 
     # Apply digest filters (plan #6) — config-driven floor + cap.
     pre_filter = len(papers)
@@ -354,21 +387,37 @@ def main(argv=None):
     if pre_filter != len(papers):
         print(f"  Filters dropped {pre_filter - len(papers)} of {pre_filter} ranked papers")
 
-    relevant = sum(1 for p in papers if p["relevance_score"] >= 5)
+    relevant = sum(1 for p in papers if p.get("relevance_score", 0) >= 5)
     print(f"  {relevant} papers match SCQ keywords")
 
-    # Generate HTML digest
+    # Generate HTML digest (always — the artifact keeps every run visible).
     print("\nGenerating digest...")
     os.makedirs(DIGEST_DIR, exist_ok=True)
     digest_path = os.path.join(DIGEST_DIR, f"digest_{digest_date}.html")
     generate_html_digest(papers, digest_date, digest_path)
 
-    # Send email
+    # Send email. Three outcomes, kept distinct on purpose:
+    #   - no new papers   → skip the email entirely (no empty-inbox noise);
+    #                        the run still succeeds and the artifact records it.
+    #   - papers to send  → email, then persist the sent IDs so the next
+    #                        overlapping-window run won't repeat them.
+    #   - --no-email      → skip (HTML/artifact only).
     email_status = "skipped"
-    if not args.no_email:
+    if not papers:
+        print("  No new papers to send - skipping email (run still recorded).")
+    elif args.no_email:
+        print("  Email skipped (--no-email)")
+    else:
         ok = send_email_digest(papers, digest_date)
         if ok:
             email_status = "sent"
+            # Record sent IDs only after a confirmed send, so a delivery
+            # failure leaves the papers eligible for the next run.
+            if not args.test:
+                _state.record_sent(papers, sent_ids, date_str=digest_date)
+                _state.prune(sent_ids)
+                state_file = _state.save_sent_ids(sent_ids)
+                print(f"  Recorded {len(papers)} sent paper(s) in {state_file}")
         else:
             email_status = "failed"
             if args.require_email:
@@ -385,8 +434,6 @@ def main(argv=None):
                     artifact_run_id=os.environ.get("GITHUB_RUN_ID", ""),
                 )
                 sys.exit(2)
-    else:
-        print("  Email skipped (--no-email)")
 
     _write_github_step_summary(
         digest_date=digest_date,

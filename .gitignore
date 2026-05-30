@@ -32,6 +32,11 @@ data/arxiv_scooper.db
 data/scientific_litter_scoop.db
 data/scq_papers.db
 
+# Cross-run digest dedup state (sent arXiv IDs). Runtime state, not source:
+# CI persists it via actions/cache (see .github/workflows/arxiv_digest.yml);
+# locally it's just untracked. Missing file → "remember nothing" (fail-open).
+data/digest_state.json
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -30,6 +30,18 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from xml.etree import ElementTree as ET
 
+
+class ArxivFetchError(RuntimeError):
+    """Raised when no arXiv response could be obtained at all.
+
+    Distinguishes a *fetch failure* (rate-limit, timeout, 5xx, or the
+    wall-clock budget being exhausted before any page was retrieved) from
+    a *genuinely empty result* (arXiv answered, but nothing matched the
+    date window). Both used to collapse into an empty list, which let the
+    digest mail a misleading "no papers" email on a transient outage.
+    """
+
+
 # ─── Configuration ───
 
 ARXIV_CATEGORIES = [
@@ -425,6 +437,17 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
                 roots.append(ET.fromstring(cat_xml))
             except ET.ParseError as e:
                 print(f"  Warning: Failed to parse {cat}: {e}")
+
+    # No usable response from either the combined query or any per-category
+    # fallback means we never reached arXiv (rate-limit / timeout / 5xx /
+    # budget exhausted). Signal that distinctly so the caller does NOT mail
+    # an empty digest that looks like "nothing was published today".
+    if not roots:
+        raise ArxivFetchError(
+            "arXiv returned no usable response (combined query and all "
+            "per-category fallbacks failed - likely rate-limit, timeout, "
+            "5xx, or exhausted network budget)"
+        )
 
     for root in roots:
         for entry in root.findall("atom:entry", ARXIV_NS):
