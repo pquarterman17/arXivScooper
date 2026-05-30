@@ -36,6 +36,7 @@ from pathlib import Path
 # re-sent. With a 7-day overlapping window, 60 days is generous.
 KEEP_DAYS = 60
 
+
 # Default location: the committed state file in the repo checkout. The
 # digest workflow runs from the repo root, so the cwd-relative path
 # resolves to the checked-out (and re-committed) file. ``pip install``

@@ -29,7 +29,6 @@ import pytest
 
 from scq.arxiv import search as arxiv_search
 
-
 # ─── Atom payload helpers ──────────────────────────────────────────
 
 
@@ -40,8 +39,9 @@ def _atom_response(entries: list[dict]) -> bytes:
     categories, published. Defaults fill in the gaps.
     """
     parts = ['<?xml version="1.0" encoding="UTF-8"?>']
-    parts.append('<feed xmlns="http://www.w3.org/2005/Atom" '
-                 'xmlns:arxiv="http://arxiv.org/schemas/atom">')
+    parts.append(
+        '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">'
+    )
     for e in entries:
         arxiv_id = e.get("id", "2401.00001")
         title = e.get("title", "Test paper")
@@ -68,12 +68,14 @@ def _atom_response(entries: list[dict]) -> bytes:
 
 def _make_urlopen_mock(payload: bytes):
     """Build a urlopen replacement that returns the given payload once."""
+
     def fake_urlopen(req, timeout=None):
         resp = MagicMock()
         resp.read.return_value = payload
         resp.__enter__ = lambda self: resp
         resp.__exit__ = lambda self, *a: None
         return resp
+
     return fake_urlopen
 
 
@@ -127,8 +129,11 @@ def test_arxiv_get_retries_on_429_and_eventually_returns_payload():
         call_count["n"] += 1
         if call_count["n"] == 1:
             raise urllib.error.HTTPError(
-                req.full_url, 429, "Too Many Requests",
-                {"Retry-After": "1"}, io.BytesIO(b""),
+                req.full_url,
+                429,
+                "Too Many Requests",
+                {"Retry-After": "1"},
+                io.BytesIO(b""),
             )
         resp = MagicMock()
         resp.read.return_value = payload
@@ -145,9 +150,14 @@ def test_arxiv_get_retries_on_429_and_eventually_returns_payload():
 
 def test_arxiv_get_retries_on_500_then_gives_up():
     """3 attempts, all 503 → returns None (not raises)."""
+
     def fake_urlopen(req, timeout=None):
         raise urllib.error.HTTPError(
-            req.full_url, 503, "Service Unavailable", {}, io.BytesIO(b""),
+            req.full_url,
+            503,
+            "Service Unavailable",
+            {},
+            io.BytesIO(b""),
         )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
@@ -163,7 +173,11 @@ def test_arxiv_get_does_not_retry_on_404():
     def fake_urlopen(req, timeout=None):
         call_count["n"] += 1
         raise urllib.error.HTTPError(
-            req.full_url, 404, "Not Found", {}, io.BytesIO(b""),
+            req.full_url,
+            404,
+            "Not Found",
+            {},
+            io.BytesIO(b""),
         )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
@@ -262,9 +276,7 @@ def test_falls_back_to_per_category_when_combined_query_fails():
     # 1 combined + 2 per-category = 3 requests
     assert calls["n"] == 3
     # Per-category URLs should NOT contain "OR"
-    per_cat_qs = [
-        urllib.parse.parse_qs(urllib.parse.urlparse(u).query) for u in captured_urls[1:]
-    ]
+    per_cat_qs = [urllib.parse.parse_qs(urllib.parse.urlparse(u).query) for u in captured_urls[1:]]
     assert per_cat_qs[0]["search_query"] == ["cat:quant-ph"]
     assert per_cat_qs[1]["search_query"] == ["cat:cond-mat.supr-con"]
 
@@ -275,10 +287,12 @@ def test_filters_papers_older_than_cutoff():
     fresh = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
     stale = (now - timedelta(days=10)).isoformat().replace("+00:00", "Z")
 
-    payload = _atom_response([
-        {"id": "2099.00001", "published": fresh},
-        {"id": "2099.00002", "published": stale},
-    ])
+    payload = _atom_response(
+        [
+            {"id": "2099.00001", "published": fresh},
+            {"id": "2099.00002", "published": stale},
+        ]
+    )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", _make_urlopen_mock(payload)):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
@@ -292,9 +306,11 @@ def test_dedupes_papers_by_arxiv_id_across_per_category_responses():
     """Same paper returned in two category responses appears once in the result."""
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    payload = _atom_response([
-        {"id": "2099.00001", "published": fresh},
-    ])
+    payload = _atom_response(
+        [
+            {"id": "2099.00001", "published": fresh},
+        ]
+    )
 
     calls = {"n": 0}
 
@@ -313,7 +329,8 @@ def test_dedupes_papers_by_arxiv_id_across_per_category_responses():
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
         papers = arxiv_search.fetch_arxiv_papers(
-            ["quant-ph", "cond-mat.supr-con"], days_back=1,
+            ["quant-ph", "cond-mat.supr-con"],
+            days_back=1,
         )
 
     ids = [p["id"] for p in papers]
@@ -338,22 +355,35 @@ def test_paper_dict_has_canonical_shape():
     abstract, published, categories, pdf_url, abs_url."""
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    payload = _atom_response([{
-        "id": "2099.00001",
-        "title": "A title",
-        "summary": "An abstract",
-        "authors": ["Alice Smith", "Bob Jones"],
-        "categories": ["quant-ph", "cond-mat.supr-con"],
-        "published": fresh,
-        "pdf_url": "http://arxiv.org/pdf/2099.00001",
-    }])
+    payload = _atom_response(
+        [
+            {
+                "id": "2099.00001",
+                "title": "A title",
+                "summary": "An abstract",
+                "authors": ["Alice Smith", "Bob Jones"],
+                "categories": ["quant-ph", "cond-mat.supr-con"],
+                "published": fresh,
+                "pdf_url": "http://arxiv.org/pdf/2099.00001",
+            }
+        ]
+    )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", _make_urlopen_mock(payload)):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
 
     p = papers[0]
-    expected_keys = {"id", "title", "authors", "short_authors", "abstract",
-                     "published", "categories", "pdf_url", "abs_url"}
+    expected_keys = {
+        "id",
+        "title",
+        "authors",
+        "short_authors",
+        "abstract",
+        "published",
+        "categories",
+        "pdf_url",
+        "abs_url",
+    }
     assert set(p.keys()) == expected_keys
     assert p["id"] == "2099.00001"
     assert p["title"] == "A title"
@@ -377,6 +407,7 @@ def test_raises_fetch_error_when_combined_and_all_per_category_fail():
     on a transient arXiv hiccup, then re-surface the missed papers the
     next day). See scq.arxiv.digest.main's ArxivFetchError handling.
     """
+
     def fake_urlopen(req, timeout=None):
         resp = MagicMock()
         resp.read.return_value = b"<not-xml>"

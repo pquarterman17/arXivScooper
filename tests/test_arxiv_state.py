@@ -60,7 +60,7 @@ def test_record_sent_stamps_new_ids_and_preserves_first_date():
 def test_prune_drops_entries_older_than_keep_days():
     today = date(2026, 5, 30)
     sent = {
-        "old": "2026-01-01",   # ~149 days ago → dropped
+        "old": "2026-01-01",  # ~149 days ago → dropped
         "fresh": "2026-05-29",  # 1 day ago → kept
     }
     state.prune(sent, keep_days=60, today=today)
