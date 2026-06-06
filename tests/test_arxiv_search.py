@@ -29,7 +29,6 @@ import pytest
 
 from scq.arxiv import search as arxiv_search
 
-
 # ─── Atom payload helpers ──────────────────────────────────────────
 
 
@@ -40,8 +39,9 @@ def _atom_response(entries: list[dict]) -> bytes:
     categories, published. Defaults fill in the gaps.
     """
     parts = ['<?xml version="1.0" encoding="UTF-8"?>']
-    parts.append('<feed xmlns="http://www.w3.org/2005/Atom" '
-                 'xmlns:arxiv="http://arxiv.org/schemas/atom">')
+    parts.append(
+        '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">'
+    )
     for e in entries:
         arxiv_id = e.get("id", "2401.00001")
         title = e.get("title", "Test paper")
@@ -68,12 +68,14 @@ def _atom_response(entries: list[dict]) -> bytes:
 
 def _make_urlopen_mock(payload: bytes):
     """Build a urlopen replacement that returns the given payload once."""
+
     def fake_urlopen(req, timeout=None):
         resp = MagicMock()
         resp.read.return_value = payload
         resp.__enter__ = lambda self: resp
         resp.__exit__ = lambda self, *a: None
         return resp
+
     return fake_urlopen
 
 
@@ -127,8 +129,11 @@ def test_arxiv_get_retries_on_429_and_eventually_returns_payload():
         call_count["n"] += 1
         if call_count["n"] == 1:
             raise urllib.error.HTTPError(
-                req.full_url, 429, "Too Many Requests",
-                {"Retry-After": "1"}, io.BytesIO(b""),
+                req.full_url,
+                429,
+                "Too Many Requests",
+                {"Retry-After": "1"},
+                io.BytesIO(b""),
             )
         resp = MagicMock()
         resp.read.return_value = payload
@@ -145,9 +150,14 @@ def test_arxiv_get_retries_on_429_and_eventually_returns_payload():
 
 def test_arxiv_get_retries_on_500_then_gives_up():
     """3 attempts, all 503 → returns None (not raises)."""
+
     def fake_urlopen(req, timeout=None):
         raise urllib.error.HTTPError(
-            req.full_url, 503, "Service Unavailable", {}, io.BytesIO(b""),
+            req.full_url,
+            503,
+            "Service Unavailable",
+            {},
+            io.BytesIO(b""),
         )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
@@ -163,7 +173,11 @@ def test_arxiv_get_does_not_retry_on_404():
     def fake_urlopen(req, timeout=None):
         call_count["n"] += 1
         raise urllib.error.HTTPError(
-            req.full_url, 404, "Not Found", {}, io.BytesIO(b""),
+            req.full_url,
+            404,
+            "Not Found",
+            {},
+            io.BytesIO(b""),
         )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
@@ -238,6 +252,63 @@ def test_combined_query_max_results_scales_with_category_count():
     assert qs["max_results"] == ["1000"]
 
 
+def test_combined_query_caps_page_size_at_arxiv_ceiling():
+    """combined_max must never exceed arXiv's per-request ceiling (2000).
+
+    Large requests are the ones that read-timeout and draw the hardest
+    rate-limiting, so even a wide window (many categories) is clamped.
+    """
+    captured_urls = []
+
+    def fake_urlopen(req, timeout=None):
+        captured_urls.append(req.full_url)
+        resp = MagicMock()
+        resp.read.return_value = _atom_response([])
+        resp.__enter__ = lambda self: resp
+        resp.__exit__ = lambda self, *a: None
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        # 5 categories, 1000 max_results → max(1000, 2500, 1000) = 2500,
+        # clamped to the 2000 ceiling.
+        arxiv_search.fetch_arxiv_papers(["a", "b", "c", "d", "e"], max_results=1000)
+
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(captured_urls[0]).query)
+    assert qs["max_results"] == [str(arxiv_search._ARXIV_MAX_PER_REQUEST)]
+    assert qs["max_results"] == ["2000"]
+
+
+def test_default_retry_budget_outlasts_a_burst_of_429s():
+    """The default retry count is patient enough to survive several 429s.
+
+    Regression guard for the chronic GitHub-Actions rate-limiting that made
+    the digest report "0 papers" on roughly every other day: the request
+    must keep retrying through a run of 429s and still return the payload,
+    rather than surrendering after a handful of attempts.
+    """
+    payload = _atom_response([])
+    call_count = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        call_count["n"] += 1
+        # Fail with 429 for the first four attempts, then succeed.
+        if call_count["n"] <= 4:
+            raise urllib.error.HTTPError(
+                req.full_url, 429, "Too Many Requests", {"Retry-After": "1"}, io.BytesIO(b"")
+            )
+        resp = MagicMock()
+        resp.read.return_value = payload
+        resp.__enter__ = lambda self: resp
+        resp.__exit__ = lambda self, *a: None
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        result = arxiv_search._arxiv_get("http://example.test/atom", "test")
+
+    assert call_count["n"] == 5, "should have retried through four 429s"
+    assert result == payload
+
+
 def test_falls_back_to_per_category_when_combined_query_fails():
     """When combined returns garbage XML, each category gets its own request."""
     captured_urls = []
@@ -262,9 +333,7 @@ def test_falls_back_to_per_category_when_combined_query_fails():
     # 1 combined + 2 per-category = 3 requests
     assert calls["n"] == 3
     # Per-category URLs should NOT contain "OR"
-    per_cat_qs = [
-        urllib.parse.parse_qs(urllib.parse.urlparse(u).query) for u in captured_urls[1:]
-    ]
+    per_cat_qs = [urllib.parse.parse_qs(urllib.parse.urlparse(u).query) for u in captured_urls[1:]]
     assert per_cat_qs[0]["search_query"] == ["cat:quant-ph"]
     assert per_cat_qs[1]["search_query"] == ["cat:cond-mat.supr-con"]
 
@@ -275,10 +344,12 @@ def test_filters_papers_older_than_cutoff():
     fresh = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
     stale = (now - timedelta(days=10)).isoformat().replace("+00:00", "Z")
 
-    payload = _atom_response([
-        {"id": "2099.00001", "published": fresh},
-        {"id": "2099.00002", "published": stale},
-    ])
+    payload = _atom_response(
+        [
+            {"id": "2099.00001", "published": fresh},
+            {"id": "2099.00002", "published": stale},
+        ]
+    )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", _make_urlopen_mock(payload)):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
@@ -292,9 +363,11 @@ def test_dedupes_papers_by_arxiv_id_across_per_category_responses():
     """Same paper returned in two category responses appears once in the result."""
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    payload = _atom_response([
-        {"id": "2099.00001", "published": fresh},
-    ])
+    payload = _atom_response(
+        [
+            {"id": "2099.00001", "published": fresh},
+        ]
+    )
 
     calls = {"n": 0}
 
@@ -313,7 +386,8 @@ def test_dedupes_papers_by_arxiv_id_across_per_category_responses():
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
         papers = arxiv_search.fetch_arxiv_papers(
-            ["quant-ph", "cond-mat.supr-con"], days_back=1,
+            ["quant-ph", "cond-mat.supr-con"],
+            days_back=1,
         )
 
     ids = [p["id"] for p in papers]
@@ -338,22 +412,35 @@ def test_paper_dict_has_canonical_shape():
     abstract, published, categories, pdf_url, abs_url."""
     now = datetime.now(timezone.utc)
     fresh = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    payload = _atom_response([{
-        "id": "2099.00001",
-        "title": "A title",
-        "summary": "An abstract",
-        "authors": ["Alice Smith", "Bob Jones"],
-        "categories": ["quant-ph", "cond-mat.supr-con"],
-        "published": fresh,
-        "pdf_url": "http://arxiv.org/pdf/2099.00001",
-    }])
+    payload = _atom_response(
+        [
+            {
+                "id": "2099.00001",
+                "title": "A title",
+                "summary": "An abstract",
+                "authors": ["Alice Smith", "Bob Jones"],
+                "categories": ["quant-ph", "cond-mat.supr-con"],
+                "published": fresh,
+                "pdf_url": "http://arxiv.org/pdf/2099.00001",
+            }
+        ]
+    )
 
     with patch.object(arxiv_search.urllib.request, "urlopen", _make_urlopen_mock(payload)):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
 
     p = papers[0]
-    expected_keys = {"id", "title", "authors", "short_authors", "abstract",
-                     "published", "categories", "pdf_url", "abs_url"}
+    expected_keys = {
+        "id",
+        "title",
+        "authors",
+        "short_authors",
+        "abstract",
+        "published",
+        "categories",
+        "pdf_url",
+        "abs_url",
+    }
     assert set(p.keys()) == expected_keys
     assert p["id"] == "2099.00001"
     assert p["title"] == "A title"
@@ -367,8 +454,17 @@ def test_paper_dict_has_canonical_shape():
     assert p["abs_url"] == "https://arxiv.org/abs/2099.00001"
 
 
-def test_returns_empty_list_when_combined_and_all_per_category_fail():
-    """All requests return invalid XML → empty list, no exception."""
+def test_raises_fetch_error_when_combined_and_all_per_category_fail():
+    """All requests return unparseable XML → ArxivFetchError, not [].
+
+    Getting bytes we cannot parse means we have ZERO usable information
+    about what papers exist — a fetch *failure*, indistinguishable in
+    outcome from a network outage. It must NOT be reported as "no new
+    papers today" (which previously made the digest mail an empty email
+    on a transient arXiv hiccup, then re-surface the missed papers the
+    next day). See scq.arxiv.digest.main's ArxivFetchError handling.
+    """
+
     def fake_urlopen(req, timeout=None):
         resp = MagicMock()
         resp.read.return_value = b"<not-xml>"
@@ -377,6 +473,20 @@ def test_returns_empty_list_when_combined_and_all_per_category_fail():
         return resp
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        with pytest.raises(arxiv_search.ArxivFetchError):
+            arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
+
+
+def test_valid_empty_feed_returns_empty_list_without_raising():
+    """A successful response with zero entries is a genuine empty result.
+
+    arXiv answered and the feed parsed — it simply had nothing new in the
+    window. This must return [] (not raise) so a real quiet day flows
+    through normally and the digest skips the email rather than failing.
+    """
+    with patch.object(
+        arxiv_search.urllib.request, "urlopen", _make_urlopen_mock(_atom_response([]))
+    ):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
 
     assert papers == []

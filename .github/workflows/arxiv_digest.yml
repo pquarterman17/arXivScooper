@@ -2,11 +2,14 @@ name: SCQ arXiv Daily Digest
 
 on:
   schedule:
-    # Target: ready in inbox by ~7 AM US Eastern.
-    # 10:45 UTC = 6:45 AM EDT / 5:45 AM EST. GitHub Actions scheduled
-    # workflows typically lag 15-60 min, so EDT arrival lands near 7 AM.
-    # In EST (winter) it'll arrive closer to 6 AM — still before work.
-    - cron: '45 10 * * *'
+    # Same-day delivery: arXiv announces new submissions ~20:00 US Eastern
+    # (Sun–Thu), which reaches the API around 00:00–01:00 UTC. Running at
+    # ~04:00 UTC fires safely AFTER that announcement, so the digest covers
+    # the batch that went live the same evening rather than catching it the
+    # next morning. 04:00 UTC = 11 PM EST (winter) / 12 AM EDT (summer).
+    # The off-round minute (04:23, not 04:00) avoids GitHub's top-of-hour
+    # scheduler pile-up, which is what dragged the old :00 cron to ~13:00.
+    - cron: '23 4 * * *'
   workflow_dispatch:
     inputs:
       days_back:
@@ -22,7 +25,7 @@ on:
           - '30'
 
 permissions:
-  contents: read  # Digests are uploaded as artifacts only (no repo writes)
+  contents: read  # Digests are artifacts; dedup state lives in actions/cache
   issues: write   # Failure handler opens/comments on digest-failure issues
 
 jobs:
@@ -32,6 +35,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Cross-run dedup state (sent arXiv IDs). The unique run_id primary key
+      # never hits, so the post-job step always saves a fresh cache; the
+      # restore-keys prefix pulls the most recent prior state into the
+      # workspace before the digest runs. No repo writes, no branch-protection
+      # concerns. If the cache is evicted (7-day idle) the worst case is one
+      # digest with repeats — never missed papers.
+      - name: Restore digest dedup state
+        uses: actions/cache@v4
+        with:
+          path: data/digest_state.json
+          key: digest-state-${{ github.run_id }}
+          restore-keys: |
+            digest-state-
 
       - name: Validate required secrets
         id: validate-secrets
@@ -71,13 +88,15 @@ jobs:
           SCQ_EMAIL_APP_PASSWORD: ${{ secrets.SCQ_EMAIL_APP_PASSWORD }}
           SCQ_EMAIL_TO: ${{ secrets.SCQ_EMAIL_TO }}
         run: |
-          # Manual trigger: use the selected days_back value
-          # Scheduled trigger: always 3 days (catches weekend submissions);
-          # dedup by arXiv ID prevents repeats in the database
+          # Manual trigger: use the selected days_back value.
+          # Scheduled trigger: 7 days — a wide, overlapping window so a
+          # failed or empty run is always recovered by the next one.
+          # Cross-run dedup (data/digest_state.json) prevents the wide
+          # window from re-emailing papers already sent.
           if [ -n "${{ github.event.inputs.days_back }}" ]; then
             DAYS="${{ github.event.inputs.days_back }}"
           else
-            DAYS=3
+            DAYS=7
           fi
           echo "Looking back $DAYS day(s)"
           python tools/arxiv_digest.py --days $DAYS --max-results 1000 --smart-weekend --require-email
@@ -93,6 +112,10 @@ jobs:
           name: digest-${{ github.run_id }}
           path: digests/
           retention-days: 30
+
+      # No explicit save step needed: actions/cache automatically saves the
+      # path at job end under the primary key (digest-state-<run_id>), which
+      # is always new, so each successful run snapshots the updated state.
 
       - name: Open or update failure issue
         if: failure()
