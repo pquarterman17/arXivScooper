@@ -4,11 +4,12 @@ on:
   schedule:
     # Same-day delivery: arXiv announces new submissions ~20:00 US Eastern
     # (Sun–Thu), which reaches the API around 00:00–01:00 UTC. Running at
-    # 04:00 UTC fires safely AFTER that announcement, so the digest covers
+    # ~04:00 UTC fires safely AFTER that announcement, so the digest covers
     # the batch that went live the same evening rather than catching it the
-    # next morning. 04:00 UTC = 11 PM EST (winter) / 12 AM EDT (summer);
-    # GitHub Actions cron lag (15–60 min) keeps it in the late-evening slot.
-    - cron: '0 4 * * *'
+    # next morning. 04:00 UTC = 11 PM EST (winter) / 12 AM EDT (summer).
+    # The off-round minute (04:23, not 04:00) avoids GitHub's top-of-hour
+    # scheduler pile-up, which is what dragged the old :00 cron to ~13:00.
+    - cron: '23 4 * * *'
   workflow_dispatch:
     inputs:
       days_back:

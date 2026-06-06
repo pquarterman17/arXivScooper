@@ -252,6 +252,63 @@ def test_combined_query_max_results_scales_with_category_count():
     assert qs["max_results"] == ["1000"]
 
 
+def test_combined_query_caps_page_size_at_arxiv_ceiling():
+    """combined_max must never exceed arXiv's per-request ceiling (2000).
+
+    Large requests are the ones that read-timeout and draw the hardest
+    rate-limiting, so even a wide window (many categories) is clamped.
+    """
+    captured_urls = []
+
+    def fake_urlopen(req, timeout=None):
+        captured_urls.append(req.full_url)
+        resp = MagicMock()
+        resp.read.return_value = _atom_response([])
+        resp.__enter__ = lambda self: resp
+        resp.__exit__ = lambda self, *a: None
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        # 5 categories, 1000 max_results → max(1000, 2500, 1000) = 2500,
+        # clamped to the 2000 ceiling.
+        arxiv_search.fetch_arxiv_papers(["a", "b", "c", "d", "e"], max_results=1000)
+
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(captured_urls[0]).query)
+    assert qs["max_results"] == [str(arxiv_search._ARXIV_MAX_PER_REQUEST)]
+    assert qs["max_results"] == ["2000"]
+
+
+def test_default_retry_budget_outlasts_a_burst_of_429s():
+    """The default retry count is patient enough to survive several 429s.
+
+    Regression guard for the chronic GitHub-Actions rate-limiting that made
+    the digest report "0 papers" on roughly every other day: the request
+    must keep retrying through a run of 429s and still return the payload,
+    rather than surrendering after a handful of attempts.
+    """
+    payload = _atom_response([])
+    call_count = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        call_count["n"] += 1
+        # Fail with 429 for the first four attempts, then succeed.
+        if call_count["n"] <= 4:
+            raise urllib.error.HTTPError(
+                req.full_url, 429, "Too Many Requests", {"Retry-After": "1"}, io.BytesIO(b"")
+            )
+        resp = MagicMock()
+        resp.read.return_value = payload
+        resp.__enter__ = lambda self: resp
+        resp.__exit__ = lambda self, *a: None
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        result = arxiv_search._arxiv_get("http://example.test/atom", "test")
+
+    assert call_count["n"] == 5, "should have retried through four 429s"
+    assert result == payload
+
+
 def test_falls_back_to_per_category_when_combined_query_fails():
     """When combined returns garbage XML, each category gets its own request."""
     captured_urls = []

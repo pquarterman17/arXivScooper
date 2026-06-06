@@ -179,8 +179,18 @@ ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/sc
 # script from chewing through the GH Actions job timeout when arXiv is slow.
 # A 2026-04-29 incident hung the runner for 15 min on a single hung connection.
 _BUDGET_DEADLINE = None
-_HTTP_TIMEOUT = 30  # per-request socket timeout (sec)
-_MAX_BACKOFF = 30  # cap any single retry wait (sec)
+_HTTP_TIMEOUT = 45  # per-request socket timeout (sec) — large feeds are slow to render
+_MAX_BACKOFF = 120  # cap any single retry wait (sec)
+# arXiv's PatentSearch/Atom API caps a single request at 2000 results and
+# 429s/times-out aggressively above that. Never ask for more in one request.
+_ARXIV_MAX_PER_REQUEST = 2000
+# Default retry budget per request. arXiv rate-limits the shared GitHub
+# Actions egress IPs hard (chronic HTTP 429), and a 429 burst can take a
+# couple of minutes to clear. The old default of 3 surrendered after ~35s
+# and wasted the 600s wall-clock budget; 6 attempts with the larger backoff
+# cap lets a single request outlast a throttle window while the budget guard
+# still prevents the runner from overrunning its timeout.
+_DEFAULT_MAX_RETRIES = 6
 
 # ─── Relevance config cache ───
 
@@ -304,7 +314,7 @@ def _budget_exceeded():
     return rem is not None and rem <= 0
 
 
-def _arxiv_get(url, label, max_retries=3):
+def _arxiv_get(url, label, max_retries=_DEFAULT_MAX_RETRIES):
     """Fetch a URL from arXiv with polite retries.
 
     Retries on HTTP 429, 5xx, socket timeouts, and transient URL errors. Honors
@@ -394,7 +404,11 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
 
     # Combined OR query — one request for all categories
     combined_query = " OR ".join(f"cat:{c}" for c in categories)
+    # Scale the page size with the category count so a wide window is covered,
+    # but never exceed arXiv's single-request ceiling: larger requests are the
+    # ones that read-timeout and draw the hardest rate-limiting.
     combined_max = max(max_results, max_results * len(categories) // 2, 1000)
+    combined_max = min(combined_max, _ARXIV_MAX_PER_REQUEST)
     params = {
         "search_query": combined_query,
         "sortBy": "submittedDate",
@@ -422,12 +436,16 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
                 )
                 break
             if i > 0:
-                time.sleep(3)  # arXiv API guideline: ~3s between requests
+                # Be extra polite under fallback: we only land here when the
+                # combined query already failed, which usually means we are
+                # being throttled. A longer inter-request gap (vs. arXiv's 3s
+                # floor) gives the rate limiter room to recover.
+                time.sleep(5)
             params = {
                 "search_query": f"cat:{cat}",
                 "sortBy": "submittedDate",
                 "sortOrder": "descending",
-                "max_results": str(max_results),
+                "max_results": str(min(max_results, _ARXIV_MAX_PER_REQUEST)),
             }
             cat_url = ARXIV_API + "?" + urllib.parse.urlencode(params)
             cat_xml = _arxiv_get(cat_url, cat)
