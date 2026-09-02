@@ -107,6 +107,7 @@ def _load_email_recipients():
                             }
                         )
             except (json.JSONDecodeError, KeyError):
+                # Malformed digest.json: fall through to the env-var fallback.
                 pass
 
     # 3. SCQ_EMAIL_TO env var (used in CI when no user_config override is

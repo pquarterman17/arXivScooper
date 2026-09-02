@@ -67,7 +67,7 @@ export function renderSidebar() {
     html += `<div class="sidebar-divider"></div><div class="sidebar-header">Collections</div>`;
     html += names.map(n => {
       const count = SCQ.getCollectionPapers(n).length;
-      return `<div class="sidebar-item ${activeCollection === n ? 'active' : ''}" onclick="setActiveCollection('${n.replace(/'/g, "\\'")}')">
+      return `<div class="sidebar-item ${activeCollection === n ? 'active' : ''}" onclick="setActiveCollection('${_js(n)}')">
         <span class="item-icon">&#128193;</span>
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</span>
         <span class="item-count">${count}</span>
@@ -79,7 +79,7 @@ export function renderSidebar() {
     <button class="add-collection-btn" onclick="showNewCollectionModal()">+ New collection</button>`;
 
   if (activeCollection) {
-    const safeCollName = activeCollection.replace(/'/g, "\\'");
+    const safeCollName = _js(activeCollection);
     html += `<button class="sidebar-export-btn" onclick="exportCollectionBib('${safeCollName}')">
       &#128229; Export "${activeCollection}" as .bib
     </button>`;

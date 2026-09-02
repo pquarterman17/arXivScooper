@@ -50,10 +50,19 @@ HttpFn = Callable[[str, dict], str]
 # ─── request building (pure) ───
 
 
+# Shape of a canonical patent number as produced by parse_patent_number:
+# two-letter country, digits, optional kind code. Anything else must not
+# reach the URL (the number originates from an HTTP request body).
+_CANONICAL_RE = re.compile(r"[A-Z]{2}[0-9]+(?:[A-Z][0-9]?)?")
+
+
 def build_request(number: str) -> tuple[str, dict]:
     """Build the (url, headers) for a patent's Google Patents page."""
     info = parse_patent_number(number)
-    return PATENT_URL.format(number=info["canonical"]), dict(_HEADERS)
+    canonical = info["canonical"]
+    if not _CANONICAL_RE.fullmatch(canonical):
+        raise ValueError(f"unexpected characters in patent number {canonical!r}")
+    return PATENT_URL.format(number=canonical), dict(_HEADERS)
 
 
 # ─── HTML parsing (pure) ───

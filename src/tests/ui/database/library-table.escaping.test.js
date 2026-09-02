@@ -62,7 +62,7 @@ function installSandbox(papers) {
   globalThis.getAllTags = () => [];
   globalThis.getRelatedPapers = () => [];
   globalThis.renderHighlights = () => '';
-  globalThis.renderStars = () => '';
+  globalThis.renderStars = (_id) => '';
   globalThis.renderCollectionDropdown = () => '';
   globalThis.sortPapers = (xs) => xs;
   globalThis.sortedClass = () => '';

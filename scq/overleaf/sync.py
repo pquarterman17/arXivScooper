@@ -157,9 +157,7 @@ def sync_mode(force=False):
     shutil.copy(BIB_PATH, target_bib)
     print(f"  Copied to .overleaf/repo/{bib_filename}")
 
-    # Check for changes
     os.chdir(REPO_DIR)
-    result = subprocess.run(["git", "diff", "--cached", "--quiet"], capture_output=True)
     # Stage the file
     print("\n[2/4] Staging file in Git...")
     subprocess.run(["git", "add", bib_filename], capture_output=True)

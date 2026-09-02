@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import copy
 import json
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,8 +35,6 @@ from typing import Any
 import jsonschema  # type: ignore[import-untyped]
 
 from .paths import paths as _paths
-
-log = logging.getLogger(__name__)
 
 # Must stay in sync with src/config/loader.js MANIFEST.
 MANIFEST: tuple[str, ...] = (

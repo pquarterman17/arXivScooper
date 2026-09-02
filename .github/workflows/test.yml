@@ -11,6 +11,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege: nothing here writes to the repo, so a read-only token is
+# all any job needs (upload-artifact works with contents: read).
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: lint (ruff)

@@ -9,6 +9,8 @@
  * All four functions are reachable from inline onclick attributes.
  */
 
+import { escapeJsString } from './escape-html.js';
+
 function _scq() { return globalThis.SCQ; }
 function _refresh() {
   if (typeof globalThis.loadPapersFromDB === 'function') globalThis.loadPapersFromDB();
@@ -35,9 +37,9 @@ export function showTagManagerModal() {
             <div class="tag-mgmt-item">
               <span class="tag-name">${tag}</span>
               <span class="tag-count">${count} paper${count !== 1 ? 's' : ''}</span>
-              <button onclick="event.stopPropagation(); promptRenameTag('${tag.replace(/'/g, "\\'")}')">Rename</button>
-              <button onclick="event.stopPropagation(); promptMergeTag('${tag.replace(/'/g, "\\'")}')">Merge</button>
-              <button class="danger" onclick="event.stopPropagation(); doDeleteTag('${tag.replace(/'/g, "\\'")}')">Delete</button>
+              <button onclick="event.stopPropagation(); promptRenameTag('${escapeJsString(tag)}')">Rename</button>
+              <button onclick="event.stopPropagation(); promptMergeTag('${escapeJsString(tag)}')">Merge</button>
+              <button class="danger" onclick="event.stopPropagation(); doDeleteTag('${escapeJsString(tag)}')">Delete</button>
             </div>`).join('')}
         </div>
         <div class="modal-btns" style="margin-top:12px">

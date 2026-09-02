@@ -154,3 +154,20 @@ describe('searchByQuery', () => {
     await expect(searchByQuery('', { fetch: vi.fn() })).rejects.toThrow('query is required');
   });
 });
+
+describe('stripHtmlTags', () => {
+  it('removes JATS/HTML tags from abstracts', async () => {
+    const { stripHtmlTags } = await import('../../services/crossref.js');
+    expect(stripHtmlTags('<jats:p>Hello <i>world</i></jats:p>')).toBe('Hello world');
+  });
+
+  it('does not leave a tag behind after nested or partial constructs', async () => {
+    const { stripHtmlTags } = await import('../../services/crossref.js');
+    // A single-pass replace would leave `<script>` behind here.
+    expect(stripHtmlTags('<<script>script>alert(1)</script>')).not.toMatch(/<script/i);
+    expect(stripHtmlTags('<<script>script>alert(1)</script>')).not.toContain('<');
+    expect(stripHtmlTags('<scr<b>ipt>x')).not.toContain('<');
+    expect(stripHtmlTags('')).toBe('');
+    expect(stripHtmlTags(null)).toBe('');
+  });
+});

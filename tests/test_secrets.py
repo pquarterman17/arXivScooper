@@ -121,7 +121,8 @@ def test_delete_returns_False_without_keyring(monkeypatch):
 
     _orig = __import__
     monkeypatch.setattr("builtins.__import__", _fail)
-    assert secrets.delete("anything") is False
+    deleted = secrets.delete("anything")
+    assert deleted is False
 
 
 def test_delete_calls_keyring(monkeypatch):
@@ -141,7 +142,8 @@ def test_delete_calls_keyring(monkeypatch):
     fake_kr.errors = fake_errors  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "keyring", fake_kr)
     monkeypatch.setitem(sys.modules, "keyring.errors", fake_errors)
-    assert secrets.delete("pw") is True
+    ok = secrets.delete("pw")
+    assert ok is True
     assert deleted == [("scq", "pw")]
 
 

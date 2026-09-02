@@ -12,4 +12,4 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scq.ingest.mendeley import main  # noqa: E402
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

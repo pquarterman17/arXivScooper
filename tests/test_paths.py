@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -11,7 +10,7 @@ import pytest
 # Make the repo root importable when running pytest from the repo
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scq.config.paths import Paths, paths, repo_root, refresh  # noqa: E402
+from scq.config.paths import Paths, paths, refresh, repo_root  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

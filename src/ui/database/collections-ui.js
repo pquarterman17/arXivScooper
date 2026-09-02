@@ -24,6 +24,8 @@
  * write through `window.*` so legacy reads stay consistent.
  */
 
+import { escapeJsString } from './escape-html.js';
+
 function _scq() { return globalThis.SCQ; }
 function _render() {
   if (typeof globalThis.render === 'function') globalThis.render();
@@ -105,7 +107,7 @@ export function renderCollectionDropdown(paperId) {
   const names = getCollectionNames();
   if (names.length === 0) return `<div class="collection-dropdown"><div class="collection-dropdown-item" style="color:var(--text3)">No collections yet</div></div>`;
   return `<div class="collection-dropdown">${names.map(n =>
-    `<div class="collection-dropdown-item" onclick="togglePaperCollection('${paperId}', '${n.replace(/'/g, "\\'")}', event)">
+    `<div class="collection-dropdown-item" onclick="togglePaperCollection('${escapeJsString(paperId)}', '${escapeJsString(n)}', event)">
       <span class="cdi-check">${isPaperInCollection(paperId, n) ? '&#10003;' : ''}</span>
       <span>${n}</span>
     </div>`

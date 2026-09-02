@@ -643,14 +643,6 @@ const SCQ = (function () {
       stmt.free();
       return rows;
     }
-    function oScalar(sql, params = []) {
-      const stmt = other.prepare(sql);
-      stmt.bind(params);
-      let val = null;
-      if (stmt.step()) val = stmt.get()[0];
-      stmt.free();
-      return val;
-    }
 
     // 1. Merge papers
     const otherPapers = oQuery("SELECT * FROM papers");

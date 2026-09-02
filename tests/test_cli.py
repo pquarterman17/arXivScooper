@@ -392,7 +392,7 @@ def test_build_index_subcommand_routes_to_module(monkeypatch):
 
 
 def test_wave2_passthrough_appears_in_help(capsys):
-    rc = main([])
+    main([])
     out = capsys.readouterr().out
     assert "mendeley" in out
     assert "inbox" in out

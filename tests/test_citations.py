@@ -16,18 +16,15 @@ exact citation format the database stores.
 
 from __future__ import annotations
 
-import re
-
 import pytest
 
 from scq.ingest.process import (
+    _make_doi_bibtex,
+    _make_doi_plain_cite,
     make_bibtex,
     make_plain_cite,
     short_author,
-    _make_doi_bibtex,
-    _make_doi_plain_cite,
 )
-
 
 # ─── Fixtures ──────────────────────────────────────────────────────
 

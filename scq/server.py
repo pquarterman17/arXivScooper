@@ -20,6 +20,7 @@ Press Ctrl+C (or close the terminal window) to stop.
 import http.server
 import json
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -115,6 +116,7 @@ def _atomic_write(target: Path, text: str) -> None:
         try:
             os.unlink(tmp_path)
         except OSError:
+            # Temp file already gone; the original error is re-raised below.
             pass
         raise
 
@@ -275,6 +277,30 @@ PATENTSVIEW_API_BASE = os.environ.get(
 ).rstrip("/")
 
 
+# Only lowercase/underscore path segments (e.g. "patent", "g_claim") and a
+# query string made of URL-safe characters may be forwarded upstream. This
+# keeps a request like /api/patents/../../x or an absolute-URL smuggle from
+# steering the keyed request anywhere but PATENTSVIEW_API_BASE.
+_PATENTS_ENDPOINT_RE = re.compile(r"[a-z_]+(?:/[a-z_]+)*")
+_PATENTS_QUERY_RE = re.compile(r"[A-Za-z0-9%._~!*'()&=+,:;@$-]*")
+
+
+def _split_patents_proxy_path(path: str) -> tuple[str | None, str]:
+    """Validate ``/api/patents/<endpoint>/?<query>`` → ``(endpoint, query)``.
+
+    Returns ``(None, "")`` when either part contains characters outside the
+    allow-list above.
+    """
+    parsed = urllib.parse.urlsplit(path)
+    endpoint = parsed.path[len("/api/patents") :].strip("/")
+    query = parsed.query
+    if not _PATENTS_ENDPOINT_RE.fullmatch(endpoint):
+        return None, ""
+    if not _PATENTS_QUERY_RE.fullmatch(query):
+        return None, ""
+    return endpoint, query
+
+
 class SCQHandler(http.server.SimpleHTTPRequestHandler):
     """Serves static files + proxies arXiv API requests."""
 
@@ -373,7 +399,6 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
         except urllib.error.HTTPError as e:
-            body = e.read() if hasattr(e, "read") else b""
             self.send_response(e.code)
             self.send_header("Content-Type", "text/plain")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -397,6 +422,15 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
         The API key is read from the 'patentsview_api_key' secret so it
         never has to live in client-side JS. Returns 503 if no key is set.
         """
+        endpoint, query = _split_patents_proxy_path(self.path)
+        if endpoint is None:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b'{"error": "Invalid PatentsView proxy path"}')
+            return
+
         from scq.config import secrets as secrets_mod
 
         api_key = secrets_mod.get("patentsview_api_key")
@@ -411,8 +445,9 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
             )
             return
 
-        rest = self.path[len("/api/patents") :].lstrip("/")
-        target = f"{PATENTSVIEW_API_BASE}/{rest}"
+        target = f"{PATENTSVIEW_API_BASE}/{endpoint}/"
+        if query:
+            target += f"?{query}"
         req = urllib.request.Request(
             target,
             headers={
@@ -583,7 +618,6 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
         except urllib.error.HTTPError as e:
-            body = e.read() if hasattr(e, "read") else b""
             self.send_response(e.code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -694,6 +728,7 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
                 try:
                     os.unlink(tmp_path)
                 except OSError:
+                    # Temp file already gone; the original error is re-raised below.
                     pass
                 raise
 
@@ -1148,8 +1183,6 @@ class SCQHandler(http.server.SimpleHTTPRequestHandler):
         Expects multipart/form-data with a single file field named 'pdf'.
         Saves the PDF to papers/ directory and returns metadata.
         """
-        import re
-
         try:
             content_type = self.headers.get("Content-Type", "")
             content_length = int(self.headers.get("Content-Length", 0))
@@ -1348,6 +1381,7 @@ def main(argv=None):
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        # Ctrl+C is the normal way to stop; shutdown happens in finally.
         pass
     finally:
         server.shutdown()

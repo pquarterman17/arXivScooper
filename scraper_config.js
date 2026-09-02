@@ -272,3 +272,7 @@ var SCRAPER_CONFIG = {
     return cite;
   },
 };
+
+// Explicit global export so module callers (and static analysis) see the
+// same object the classic <script> declared above.
+globalThis.SCRAPER_CONFIG = SCRAPER_CONFIG;

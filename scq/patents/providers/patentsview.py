@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -75,8 +76,20 @@ HttpFn = Callable[[str, dict], dict]
 # ─── request building (pure) ───
 
 
+def _check_doc_number(doc_number: str) -> str:
+    """Reject anything but a plain digit string before it goes into a URL.
+
+    ``doc_number`` ultimately comes from user input (CLI arg or HTTP body),
+    so this is the one place that guarantees it can't alter the request.
+    """
+    if not re.fullmatch(r"[0-9]+", doc_number):
+        raise ValueError(f"patent document number must be digits only, got {doc_number!r}")
+    return doc_number
+
+
 def build_patent_request(doc_number: str, api_key: str) -> tuple[str, dict]:
     """Build the (url, headers) for the bibliographic patent query."""
+    doc_number = _check_doc_number(doc_number)
     q = json.dumps({"patent_id": doc_number})
     f = json.dumps(_PATENT_FIELDS)
     url = f"{_api_base()}/patent/?q={urllib.parse.quote(q)}&f={urllib.parse.quote(f)}"
@@ -85,6 +98,7 @@ def build_patent_request(doc_number: str, api_key: str) -> tuple[str, dict]:
 
 def build_claims_request(doc_number: str, api_key: str) -> tuple[str, dict]:
     """Build the (url, headers) for the granted-claims fulltext query."""
+    doc_number = _check_doc_number(doc_number)
     q = json.dumps({"patent_id": doc_number})
     f = json.dumps(_CLAIM_FIELDS)
     o = json.dumps({"size": 500})  # plenty for any single patent's claims

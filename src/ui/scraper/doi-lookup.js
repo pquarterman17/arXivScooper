@@ -16,6 +16,8 @@
  * no concurrency since the UI is single-tab.
  */
 
+import { stripHtmlTags } from '../../services/crossref.js';
+
 async function doDoiLookup() {
   const input = document.getElementById('doi-input').value.trim();
   const status = document.getElementById('doi-status');
@@ -50,7 +52,7 @@ async function doDoiLookup() {
     if (!item) throw new Error('No data returned for this DOI');
 
     const title = (item.title || [''])[0].replace(/\s+/g, ' ').trim();
-    const abstract = (item.abstract || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    const abstract = stripHtmlTags(item.abstract || '').replace(/\s+/g, ' ').trim();
     const dateParts = item.published?.['date-parts']?.[0] || [];
     const year = dateParts[0] || '';
     const month = String(dateParts[1] || 1).padStart(2, '0');

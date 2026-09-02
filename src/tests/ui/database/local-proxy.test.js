@@ -12,7 +12,7 @@
  *     pre-extraction boot block
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 let _origFetch;
 beforeEach(() => {
@@ -25,8 +25,6 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = _origFetch;
 });
-
-import { afterEach } from 'vitest';
 
 async function load() {
   return await import('../../../ui/database/local-proxy.js?v=' + Math.random());

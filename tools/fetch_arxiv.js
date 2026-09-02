@@ -121,8 +121,17 @@ async function main() {
   const pdfName = `${arxivId}_${lastName}_${shortTitle}.pdf`;
   const pdfPath = path.join(PAPERS_DIR, pdfName);
 
-  if (fs.existsSync(pdfPath)) {
-    const sizeMB = (fs.statSync(pdfPath).size / 1048576).toFixed(1);
+  // Single stat() call instead of exists()+stat() so there is no window
+  // between the check and the use where the file can change underneath us.
+  let existingSize = null;
+  try {
+    existingSize = fs.statSync(pdfPath).size;
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+
+  if (existingSize !== null) {
+    const sizeMB = (existingSize / 1048576).toFixed(1);
     console.log(`\n[2/3] PDF already exists: ${pdfName} (${sizeMB} MB)`);
   } else {
     console.log(`\n[2/3] Downloading PDF...`);
