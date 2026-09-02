@@ -99,3 +99,7 @@ pending_papers.json
 
 # setuptools editable-install metadata (uv pip install -e .)
 *.egg-info/
+
+# pytest-cov data file
+.coverage
+.coverage.*
