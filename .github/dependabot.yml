@@ -1,0 +1,30 @@
+# Dependabot: automatic dependency-update PRs for every ecosystem in the repo.
+# Security alerts still fire for any vulnerable pinned version; this makes the
+# fix a one-click merge instead of a manual `npm audit fix`.
+version: 2
+updates:
+  # Frontend dev toolchain (vitest, vite, jsdom, sql.js, typescript).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # Python package deps (pyproject.toml) + the digest workflow requirements.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /tools/github_actions
+    schedule:
+      interval: weekly
+
+  # Pinned action majors in .github/workflows/*.yml.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
