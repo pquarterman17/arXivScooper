@@ -154,7 +154,6 @@ def lookup_doi(doi):
     volume, pages, doi, cite_bib, cite_txt
     Returns None on network error or invalid DOI."""
     try:
-        import json
         import urllib.error
         import urllib.request
 
@@ -374,6 +373,7 @@ def insert_paper(
     try:
         cur.execute("DELETE FROM papers_fts WHERE id = ?", (arxiv_id,))
     except Exception:
+        # No FTS table / no prior row: nothing to clear.
         pass
     cur.execute(
         """

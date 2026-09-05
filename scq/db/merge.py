@@ -311,6 +311,7 @@ def merge_databases(source_path, target_path, dry_run=False):
         try:
             tgt.execute("INSERT INTO papers_fts(papers_fts) VALUES('rebuild')")
         except Exception:
+            # FTS table may not exist in an older target schema.
             pass
 
     if not dry_run:
@@ -452,12 +453,14 @@ def export_collection(db_path, collection_name, output_path):
                 (p["paper_id"], p["page_num"], p["content"]),
             )
     except Exception:
+        # pdf_text table may not exist in the source DB.
         pass
 
     # Rebuild FTS
     try:
         out.execute("INSERT INTO papers_fts(papers_fts) VALUES('rebuild')")
     except Exception:
+        # FTS table may not exist in the exported schema.
         pass
 
     out.commit()

@@ -32,9 +32,9 @@ from pathlib import Path
 
 import pytest
 
-from scq.config.paths import paths as resolve_paths, refresh as refresh_paths
+from scq.config.paths import paths as resolve_paths
+from scq.config.paths import refresh as refresh_paths
 from scq.ingest import process as proc
-
 
 # ─── Fixture: an isolated repo root with all required subdirs ─────
 
@@ -331,7 +331,7 @@ def test_arxiv_pipeline_resolves_pdf_by_arxiv_id_prefix_when_pdf_file_missing(
         isolated_repo, stub_subprocess, monkeypatch):
     """If meta['pdf_file'] doesn't exist but a glob match does, that wins."""
     arxiv_id = "2401.99009"
-    meta = _write_meta(
+    _write_meta(
         isolated_repo.inbox_dir, arxiv_id,
         pdf_file="not-this-name.pdf",  # intentionally points at nothing
     )

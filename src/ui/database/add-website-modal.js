@@ -18,7 +18,6 @@
  */
 
 import { lookupByDoi } from '../../services/crossref.js';
-import { formatBibTeX, formatPlainText } from '../../services/doi.js';
 
 function _scq() { return globalThis.SCQ; }
 function _call(name, ...args) {

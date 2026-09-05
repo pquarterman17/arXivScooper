@@ -13,7 +13,7 @@
  * dispatches synthetic clicks against jsdom-built elements.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 beforeEach(async () => {
   document.body.innerHTML = '';

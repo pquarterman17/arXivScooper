@@ -50,6 +50,7 @@ def extract_text_from_pdf(pdf_path):
             if result.stdout.strip():
                 return [{"page": 1, "text": result.stdout.strip()}]
         except Exception:
+            # pdftotext missing or failed: no text for this PDF.
             pass
     return []
 

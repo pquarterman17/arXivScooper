@@ -26,6 +26,8 @@
  * naturally.
  */
 
+import { stripHtmlTags } from '../../services/crossref.js';
+
 // ─── Sort helpers ───
 
 function getArxivSortParams(sortValue) {
@@ -259,7 +261,7 @@ async function searchCrossref(query, sourceKey, sortValue = 'date-desc') {
   items.forEach(item => {
     const doi = item.DOI || '';
     const title = (item.title || [''])[0].replace(/\s+/g, ' ').trim();
-    const abstract = (item.abstract || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    const abstract = stripHtmlTags(item.abstract || '').replace(/\s+/g, ' ').trim();
     const dateParts = item.published?.['date-parts']?.[0] || [];
     const year = dateParts[0] || '';
     const month = String(dateParts[1] || 1).padStart(2, '0');

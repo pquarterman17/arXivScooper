@@ -63,3 +63,36 @@ describe('escapeHtml', () => {
     expect(wrap.textContent).toBe(dangerous);
   });
 });
+
+describe('escapeJsString', () => {
+  it('escapes backslashes before quotes so a pre-escaped quote cannot break out', async () => {
+    const { escapeJsString } = await load();
+    expect(escapeJsString("it's")).toBe("it\\'s");
+    expect(escapeJsString("a\\'b")).toBe("a\\\\\\'b");
+    expect(escapeJsString('back\\slash')).toBe('back\\\\slash');
+  });
+
+  it('neutralises HTML-significant characters and line terminators', async () => {
+    const { escapeJsString } = await load();
+    const out = escapeJsString('<b>"x"&\n\r\u2028\u2029');
+    expect(out).toBe('\\x3cb\\x3e\\x22x\\x22\\x26\\n\\r\\u2028\\u2029');
+    expect(out).not.toMatch(/["<>&\n\r\u2028\u2029]/);
+  });
+
+  it('treats null/undefined as empty', async () => {
+    const { escapeJsString } = await load();
+    expect(escapeJsString(null)).toBe('');
+    expect(escapeJsString(undefined)).toBe('');
+  });
+
+  it('survives HTML attribute parsing and JS string-literal parsing', async () => {
+    const { escapeJsString } = await load();
+    const value = `it's "quoted" <b>&amp;</b> back\\slash\nnext`;
+    document.body.innerHTML = `<button onclick="__seen('${escapeJsString(value)}')">x</button>`;
+    // What the HTML parser hands to the JS engine for the handler body:
+    const body = document.querySelector('button').getAttribute('onclick');
+    const seen = [];
+    new Function('__seen', body)((v) => seen.push(v));
+    expect(seen).toEqual([value]);
+  });
+});

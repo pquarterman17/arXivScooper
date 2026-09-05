@@ -39,10 +39,27 @@ function _defaultFetch() {
  *                       refine sourceKey.
  * @param autoTagRules — optional auto-tag rule object (services/auto-tag).
  */
+/**
+ * Strip HTML/JATS tags from an abstract. Repeats until no tag pattern is
+ * left so nested/partial constructs like `<<script>script>` can't survive
+ * a single pass.
+ * @param {string} s
+ * @returns {string}
+ */
+export function stripHtmlTags(s) {
+  let out = String(s ?? '');
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, '');
+  } while (out !== prev);
+  return out;
+}
+
 export function parseItem(item, sourceKey = 'crossref', sourceCfg = {}, autoTagRules = null) {
   const doi = item.DOI || '';
   const title = (item.title || [''])[0].replace(/\s+/g, ' ').trim();
-  const abstract = (item.abstract || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  const abstract = stripHtmlTags(item.abstract || '').replace(/\s+/g, ' ').trim();
   const dateParts = item.published?.['date-parts']?.[0] || [];
   const year = dateParts[0] || '';
   const month = String(dateParts[1] || 1).padStart(2, '0');

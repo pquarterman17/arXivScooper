@@ -16,13 +16,11 @@ import pytest
 
 from scq.db.migrations import (
     DEFAULT_MIGRATIONS_DIR,
-    Migration,
-    apply_pending,
     applied_versions,
+    apply_pending,
     current_version,
     discover,
 )
-
 
 # ─── Fixtures ─────────────────────────────────────────────────────────
 

@@ -166,3 +166,39 @@ def test_list_fts_filter(running_server):
 
     status, body = _get(port, "/api/patents/list?q=graphene")
     assert body["patents"] == []
+
+
+# ─── /api/patents/<endpoint> proxy path validation ───
+
+
+def test_split_patents_proxy_path_accepts_expected_shapes():
+    from scq.server import _split_patents_proxy_path
+
+    assert _split_patents_proxy_path("/api/patents/patent/?q=%7B%22a%22%3A1%7D&f=%5B%5D") == (
+        "patent",
+        "q=%7B%22a%22%3A1%7D&f=%5B%5D",
+    )
+    assert _split_patents_proxy_path("/api/patents/g_claim/") == ("g_claim", "")
+    assert _split_patents_proxy_path("/api/patents/g_claim") == ("g_claim", "")
+
+
+def test_split_patents_proxy_path_rejects_traversal_and_odd_characters():
+    from scq.server import _split_patents_proxy_path
+
+    for bad in (
+        "/api/patents/../other/",
+        "/api/patents/patent/../../x",
+        "/api/patents//evil.example/patent/",
+        "/api/patents/Patent/",
+        "/api/patents/patent/?q=a b",
+        "/api/patents/patent/?q=a/b",
+        "/api/patents/",
+    ):
+        assert _split_patents_proxy_path(bad) == (None, ""), bad
+
+
+def test_proxy_rejects_bad_path_with_400(running_server):
+    port = running_server
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(port, "/api/patents/Patent/")
+    assert exc.value.code == 400

@@ -30,6 +30,33 @@ export function escapeHtml(text) {
   return div.innerHTML;
 }
 
+/**
+ * Escape a value for use inside a *single-quoted* JS string literal that is
+ * itself embedded in an inline `onclick="fn('...')"` HTML attribute.
+ *
+ * Backslashes are escaped first (so a pre-existing `\'` can't be turned
+ * into an unescaped quote), then the quote characters, line terminators
+ * and every character that could be interpreted by the HTML parser
+ * (`<`, `>`, `&`, `"`) are written as JS `\xNN` escapes, which the HTML
+ * attribute parser leaves untouched.
+ *
+ * @param {unknown} s
+ * @returns {string}
+ */
+export function escapeJsString(s) {
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\x22')
+    .replace(/</g, '\\x3c')
+    .replace(/>/g, '\\x3e')
+    .replace(/&/g, '\\x26')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 // Window shim — the boot block has dozens of template literals that
 // reference `escapeHtml(...)` by bare name (resolves through globalThis).
 globalThis.escapeHtml = escapeHtml;

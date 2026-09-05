@@ -110,6 +110,7 @@ def find_figure_pages(doc, captions):
                     fig_pages.add(page_idx)
                 pix = None
             except Exception:
+                # Unreadable/odd image object: skip it, keep scanning.
                 pass
 
     return sorted(fig_pages)
@@ -176,6 +177,7 @@ def extract_figure_regions(page_img, doc, page_idx):
                     y1 = min(ih, y1 + pad_y)
                     regions.append((x0, y0, x1, y1))
         except Exception:
+            # Bad image on this page: caption-anchored fallback still runs.
             pass
 
     # Merge overlapping regions

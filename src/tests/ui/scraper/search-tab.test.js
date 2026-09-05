@@ -9,7 +9,7 @@
  * action-registry tests already cover the dispatch glue.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 const SHIM_NAMES = [
   'getArxivSortParams', 'applySortToResults',

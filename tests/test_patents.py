@@ -665,3 +665,24 @@ def test_cli_patents_routes_through_top_level():
     from scq.cli import _PASSTHROUGH_COMMANDS
 
     assert "patents" in _PASSTHROUGH_COMMANDS
+
+
+# ─── URL builders refuse non-canonical input ───
+
+
+def test_patentsview_builders_reject_non_digit_doc_number():
+    for bad in ("10374134/../x", "abc", "", "1 2"):
+        with pytest.raises(ValueError):
+            patentsview.build_patent_request(bad, "KEY")
+        with pytest.raises(ValueError):
+            patentsview.build_claims_request(bad, "KEY")
+
+
+def test_google_build_request_rejects_unexpected_canonical(monkeypatch):
+    monkeypatch.setattr(
+        google,
+        "parse_patent_number",
+        lambda _n: {"canonical": "US1/../evil", "country": "US", "doc_number": "1"},
+    )
+    with pytest.raises(ValueError):
+        google.build_request("US1")
