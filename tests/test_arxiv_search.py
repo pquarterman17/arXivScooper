@@ -585,7 +585,10 @@ def test_arxiv_get_406_backs_off_exponentially(monkeypatch):
 
     assert len(slept) == 3
     assert slept == sorted(slept), f"backoff must grow, got {slept}"
-    assert slept[-1] >= 4 * slept[0], f"not exponential: {slept}"
+    # Un-jittered the ladder is 5/10/20, but each wait carries up to 25%
+    # jitter, so the observed ratio ranges ~3.2-5.0. Assert against the
+    # low end; a tighter bound is flaky, not stricter.
+    assert slept[-1] >= 3 * slept[0], f"not exponential: {slept}"
     assert sum(slept) > 30, f"too impatient to outlast a window: {slept}"
 
 

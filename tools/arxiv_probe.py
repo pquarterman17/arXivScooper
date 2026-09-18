@@ -1,67 +1,95 @@
 #!/usr/bin/env python3
-"""Round 6: is rss.arxiv.org a usable fallback while /api/query is 406ing?
+"""Where is arXiv rejecting us right now — the API, RSS, or neither?
 
-Round 5 showed the API origin rejecting everything except one cached URL
-(max_results=25 returned a byte-identical 49982 every pass, while
-max_results=1 - a strictly smaller request - 406'd). That is a Fastly cache
-hit in front of a failing origin, and the digest's combined query is unique
-to this project so it never gets a cache hit.
+First thing to run when a digest run fails. On 2026-09-18 the Atom API origin
+(/api/query) returned HTTP 406 to every request for hours while Fastly kept
+serving a few cached URLs, so ad-hoc checks looked fine while every scheduled
+digest failed. rss.arxiv.org was up the whole time. This checks both, so you
+can tell an API outage (the digest falls back to RSS on its own) from a total
+outage (nothing to do but wait) from a local network problem.
 
-Round 1 saw rss.arxiv.org answer 200 at a moment the API was 406ing. If the
-RSS feeds are up and carry the fields the digest needs (id, title, abstract,
-authors, date, categories), they are a real fallback source.
+Exit 0 if any source answered, 1 if none did.
+
+Run: python tools/arxiv_probe.py
 """
 
 from __future__ import annotations
 
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 
-import feedparser
-
 UA = "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
-CATS = ["quant-ph", "cond-mat.supr-con", "cond-mat.mtrl-sci", "cond-mat.mes-hall"]
+CATS = ["quant-ph", "cond-mat.supr-con"]
 
 
-def fetch(url):
+def _status(url):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
     try:
         with urllib.request.urlopen(req, timeout=45) as r:
-            return r.status, r.read()
+            return r.status, len(r.read())
     except urllib.error.HTTPError as e:
-        return e.code, b""
+        return e.code, 0
     except Exception as e:  # noqa: BLE001
-        return type(e).__name__, b""
+        return type(e).__name__, 0
 
 
-print("=== API right now (control) ===")
-api = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(
-    {
-        "search_query": "cat:quant-ph",
-        "sortBy": "submittedDate",
-        "sortOrder": "descending",
-        "max_results": "200",
-    }
-)
-st, body = fetch(api)
-print(f"  api max_results=200 -> {st} ({len(body)} bytes)")
+def main():
+    from scq.arxiv.rss import RSS_BASE
+    from scq.arxiv.search import _api_bases
 
-print("\n=== RSS feeds ===")
-for cat in CATS:
-    st, body = fetch(f"https://rss.arxiv.org/rss/{cat}")
-    if st != 200:
-        print(f"  {cat}: {st}")
-        continue
-    feed = feedparser.parse(body)
-    n = len(feed.entries)
-    print(f"  {cat}: 200, {len(body)} bytes, {n} entries")
-    if n and cat == CATS[0]:
-        e = feed.entries[0]
-        print("    --- first entry field check ---")
-        for field in ("id", "link", "title", "summary", "author", "published", "updated"):
-            val = getattr(e, field, None)
-            shown = (str(val)[:90] + "...") if val and len(str(val)) > 90 else val
-            print(f"    {field}: {shown!r}")
-        tags = [t.get("term") for t in getattr(e, "tags", [])]
-        print(f"    tags: {tags}")
+    # A realistic query: a tiny one can be served from cache and hide an
+    # origin that is rejecting everything the digest actually asks for.
+    qs = urllib.parse.urlencode(
+        {
+            "search_query": "cat:quant-ph",
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+            "max_results": "200",
+        }
+    )
+
+    api_ok = rss_ok = False
+    codes = []
+
+    print("Atom API:")
+    for base in _api_bases():
+        st, n = _status(f"{base}?{qs}")
+        codes.append(st)
+        api_ok = api_ok or st == 200
+        print(f"  {urllib.parse.urlparse(base).netloc}: {st} ({n} bytes)")
+
+    print("RSS:")
+    for cat in CATS:
+        st, n = _status(f"{RSS_BASE}/{cat}")
+        codes.append(st)
+        rss_ok = rss_ok or st == 200
+        print(f"  {cat}: {st} ({n} bytes)")
+
+    print()
+    if api_ok and rss_ok:
+        print("Both sources are up. A digest failure now is not arXiv availability.")
+    elif rss_ok:
+        print(
+            "The Atom API is rejecting us but RSS is up — the digest falls back to\n"
+            "RSS automatically, so it will still send today's papers. Nothing to fix."
+        )
+    elif api_ok:
+        print("RSS is down but the API works — the digest uses the API first anyway.")
+    elif all(isinstance(c, str) for c in codes):
+        print(
+            "Nothing reached arXiv at all (network errors, not HTTP responses).\n"
+            "Check connectivity/proxy from this machine."
+        )
+    else:
+        print(
+            f"Neither source answered (codes: {sorted(set(map(str, codes)))}).\n"
+            "Wait it out: the next scheduled run recovers the missed papers via\n"
+            "the overlapping lookback window."
+        )
+    return 0 if (api_ok or rss_ok) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

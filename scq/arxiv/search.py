@@ -605,10 +605,30 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
     # budget exhausted). Signal that distinctly so the caller does NOT mail
     # an empty digest that looks like "nothing was published today".
     if not roots:
+        # The Atom API gave us nothing. Before failing the whole run, try the
+        # RSS feeds: on 2026-09-18 the /api/query origin 406'd every request
+        # for hours while rss.arxiv.org served the same announcements fine.
+        # RSS only covers the latest announcement batch, so this recovers
+        # today's papers rather than the full window - which still beats
+        # sending nothing, and cross-run dedup keeps the next run correct.
+        print("  API returned nothing — falling back to the RSS feeds...")
+        try:
+            from scq.arxiv.rss import fetch_rss_papers
+
+            rss_papers = fetch_rss_papers(categories, days_back=days_back)
+        except Exception as e:  # noqa: BLE001 — fallback must not mask the real error
+            print(f"  Warning: RSS fallback failed: {e}")
+            rss_papers = []
+        if rss_papers:
+            print(f"  RSS fallback recovered {len(rss_papers)} paper(s)")
+            for cat in categories:
+                n = sum(1 for p in rss_papers if cat in p.get("categories", []))
+                print(f"  {cat}: {n} papers (via RSS)")
+            return rss_papers
         raise ArxivFetchError(
-            "arXiv returned no usable response on any API host (combined "
-            "query and all per-category fallbacks failed - likely rate-limit, "
-            "blocked/rejected request, timeout, 5xx, or exhausted network budget)"
+            "arXiv returned nothing usable on any API host and the RSS "
+            "fallback was empty too (likely rate-limit, a rejecting origin, "
+            "timeout, 5xx, or an exhausted network budget)"
         )
 
     for root in roots:

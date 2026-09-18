@@ -231,16 +231,26 @@ local proxy in `scq/server.py` that avoids CORS and sets a proper User-Agent hea
   GitHub Actions digest alive when the runner's egress IP is blocked or throttled
   on `arxiv.org`. Do NOT make `export.arxiv.org` the primary. Pin a single host
   with `SCQ_ARXIV_API_BASE` (comma-separated for an explicit ordered list).
-- **HTTP 406 from `/api/query` is transient throttling, not a bad request.**
-  arXiv's edge rejects *every* client for windows of several minutes — measured
-  2026-09-18 from a runner: urllib, raw `http.client` sending curl's exact
-  headers, and any User-Agent all 406 together, then 45/45 requests succeed from
-  the same client minutes later. Changing headers does not help and is not the
-  fix; waiting is. `_THROTTLE_STATUSES` groups 403/406/415/429 so they all get
-  exponential backoff, and the retry ladder is sized to outlast a multi-minute
-  window. Do NOT "fix" a 406 by fiddling with `_HEADER_PROFILES`.
-  Run `python tools/arxiv_probe.py` (or the **arXiv API probe** workflow) to see
-  whether a window is open right now before chasing a regression.
+- **HTTP 406 from `/api/query` is arXiv's origin failing, not our request.**
+  Diagnosed 2026-09-18 over six probe rounds from a CI runner. What the evidence
+  actually shows: headers are irrelevant (raw `http.client` sending curl's exact
+  three headers 406s while the curl binary gets 200 at the same moment), and so
+  is request size — `max_results=25` returned a byte-identical 49982 on every
+  pass while `max_results=1`, a strictly *smaller* request, 406'd. That pattern
+  is a **Fastly cache hit in front of a rejecting origin**: popular URLs are
+  served from cache, everything else reaches the broken origin. The digest's
+  combined OR-query is unique to this project, so it never gets a cache hit and
+  fails every single run — while ad-hoc spot checks look fine. Do NOT "fix" a
+  406 by changing `_HEADER_PROFILES` or shrinking `max_results`; both were
+  measured and neither is the cause.
+- **The digest falls back to `rss.arxiv.org`** (`scq/arxiv/rss.py`) when the API
+  yields nothing — those feeds stayed up throughout the outage. RSS carries only
+  the latest announcement batch (~1 day), so a fallback run recovers today's
+  papers rather than the full lookback window; cross-run dedup keeps the next
+  run correct. `_THROTTLE_STATUSES` (403/406/415/429) also get exponential
+  backoff first, so a genuinely brief rejection is simply waited out.
+- Run `python tools/arxiv_probe.py` (or the **arXiv API probe** workflow) to see
+  which sources are up right now before chasing a regression.
 - If 429 rate-limit errors occur, wait a few minutes between searches.
 
 ## CI Pipeline

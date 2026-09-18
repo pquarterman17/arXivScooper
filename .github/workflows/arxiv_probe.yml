@@ -5,9 +5,6 @@ name: arXiv API probe (diagnostic)
 # tools/arxiv_probe.py); run this to tell an open window apart from a real
 # regression. Never emails anything.
 on:
-  push:
-    branches:
-      - claude/arxiv-scraper-failures-ksvp4r
   workflow_dispatch:
 
 permissions:
