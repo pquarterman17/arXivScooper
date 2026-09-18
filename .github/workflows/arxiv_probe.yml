@@ -1,0 +1,35 @@
+name: arXiv API probe (diagnostic)
+
+# Temporary diagnostic: reproduces the digest's HTTP 406 from a GitHub Actions
+# runner and prints the edge's own explanation. Runs on push to the
+# investigation branch and on manual dispatch; it never emails anything.
+on:
+  push:
+    branches:
+      - claude/arxiv-scraper-failures-ksvp4r
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Probe arXiv from the runner
+        run: python -u tools/arxiv_probe.py
+      - name: curl comparison
+        run: |
+          set -x
+          curl -sS -o /dev/null -w 'curl-default: %{http_code}\n' \
+            'https://export.arxiv.org/api/query?search_query=cat:quant-ph&max_results=1' || true
+          curl -sS -o /dev/null -w 'curl-http1.1: %{http_code}\n' --http1.1 \
+            'https://export.arxiv.org/api/query?search_query=cat:quant-ph&max_results=1' || true
+          curl -isS --max-time 30 \
+            'https://arxiv.org/api/query?search_query=cat:quant-ph&max_results=1' \
+            | head -40 || true
