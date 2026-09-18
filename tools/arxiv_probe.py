@@ -1,116 +1,130 @@
 #!/usr/bin/env python3
-"""Diagnose what the arXiv API actually rejects, from the machine that runs it.
+"""Find an HTTP client that arXiv's /api/query endpoint accepts.
 
-The digest started failing with a blanket HTTP 406 on every request. Guessing
-at the cause from a sandbox that cannot reach arxiv.org burned a cycle, so this
-probes the real endpoint from the runner and prints the evidence: status,
-response headers, and the error body, which is where the edge usually explains
-itself.
+Round 1 established: urllib gets 406 on /api/query with every header profile
+(including curl's exact User-Agent + Accept), while curl gets 200 on the same
+URL, and urllib gets 200 on rss.arxiv.org and /abs/ pages. So the rejection is
+path-scoped and keyed on something structural about the Python client, not on
+the headers we choose.
+
+This round discriminates between the remaining causes:
+  - header casing / Connection / Accept-Encoding  -> raw http.client matching
+    curl byte-for-byte at the HTTP layer will pass
+  - TLS fingerprint (JA3)                          -> only a non-Python TLS
+    stack (the curl binary) will pass
 
 Run: python tools/arxiv_probe.py
 """
 
 from __future__ import annotations
 
+import http.client
+import json
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 
-SIMPLE = {"search_query": "cat:quant-ph", "max_results": "1"}
-FULL = {
-    "search_query": "cat:quant-ph OR cat:cond-mat.supr-con",
-    "sortBy": "submittedDate",
-    "sortOrder": "descending",
-    "max_results": "2000",
-}
-
-HOSTS = {
-    "arxiv-https": "https://arxiv.org/api/query",
-    "export-https": "https://export.arxiv.org/api/query",
-    "export-http": "http://export.arxiv.org/api/query",
-}
-
-PROFILES = {
-    "bare": {},
-    "ua-only": {"User-Agent": "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"},
-    "profile0": {
-        "User-Agent": "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)",
-        "Accept": "application/atom+xml,application/xml;q=0.9,text/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate",
-    },
-    "curl-like": {"User-Agent": "curl/8.5.0", "Accept": "*/*"},
-    "browser": {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    },
-}
+HOST = "export.arxiv.org"
+PATH = "/api/query?" + urllib.parse.urlencode({"search_query": "cat:quant-ph", "max_results": "1"})
+URL = f"https://{HOST}{PATH}"
 
 
-def probe(label, url, headers, timeout=30):
-    req = urllib.request.Request(url, headers=headers)
+def report(label, status, detail=""):
+    flag = "OK  " if status == 200 else "FAIL"
+    print(f"  [{flag}] {label}: {status} {detail}")
+    return status == 200
+
+
+def try_urllib(label, headers):
+    req = urllib.request.Request(URL, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read()
-            print(
-                f"  [OK   ] {label}: {resp.status}, {len(body)} bytes, "
-                f"ctype={resp.headers.get('Content-Type')}"
-            )
-            return True
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return report(label, r.status, f"{len(r.read())} bytes")
     except urllib.error.HTTPError as e:
-        body = b""
-        try:
-            body = e.read()[:400]
-        except Exception:
-            pass
-        server = e.headers.get("Server") if e.headers else "?"
-        cf = e.headers.get("cf-mitigated") if e.headers else None
-        print(f"  [HTTP ] {label}: {e.code} {e.reason} | server={server} | cf-mitigated={cf}")
-        if body:
-            print(f"           body: {body.decode('utf-8', 'replace')[:400]!r}")
-        return False
+        return report(label, e.code, e.reason)
     except Exception as e:  # noqa: BLE001
-        print(f"  [ERR  ] {label}: {type(e).__name__}: {e}")
-        return False
+        return report(label, -1, f"{type(e).__name__}: {e}")
 
 
-def main():
-    print("=== 1. header profiles (arxiv.org, simple query) ===")
-    for name, hdrs in PROFILES.items():
-        probe(name, HOSTS["arxiv-https"] + "?" + urllib.parse.urlencode(SIMPLE), hdrs)
+def try_raw_httpclient(label, headers, skip_accept_encoding=True):
+    """Exactly control which headers go on the wire, and their casing/order."""
+    try:
+        conn = http.client.HTTPSConnection(HOST, timeout=30)
+        conn.putrequest("GET", PATH, skip_host=True, skip_accept_encoding=skip_accept_encoding)
+        for k, v in headers.items():
+            conn.putheader(k, v)
+        conn.endheaders()
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        return report(label, resp.status, f"{len(body)} bytes")
+    except Exception as e:  # noqa: BLE001
+        return report(label, -1, f"{type(e).__name__}: {e}")
 
-    print("\n=== 2. hosts (profile0, simple query) ===")
-    for name, base in HOSTS.items():
-        probe(name, base + "?" + urllib.parse.urlencode(SIMPLE), PROFILES["profile0"])
 
-    print("\n=== 3. query shape (export-https, profile0) ===")
-    base = HOSTS["export-https"]
-    probe("simple", base + "?" + urllib.parse.urlencode(SIMPLE), PROFILES["profile0"])
-    probe("full-2000", base + "?" + urllib.parse.urlencode(FULL), PROFILES["profile0"])
-    probe(
-        "full-100",
-        base + "?" + urllib.parse.urlencode({**FULL, "max_results": "100"}),
-        PROFILES["profile0"],
+def try_curl(label, extra=()):
+    try:
+        out = subprocess.run(
+            ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", *extra, URL],
+            capture_output=True,
+            text=True,
+            timeout=40,
+        )
+        return report(label, int(out.stdout.strip() or 0))
+    except Exception as e:  # noqa: BLE001
+        return report(label, -1, f"{type(e).__name__}: {e}")
+
+
+CURL_HEADERS = {"Host": HOST, "User-Agent": "curl/8.5.0", "Accept": "*/*"}
+POLITE = "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
+
+print("=== A. urllib variants ===")
+results = {}
+results["urllib-keepalive"] = try_urllib(
+    "urllib + Connection: keep-alive",
+    {"User-Agent": POLITE, "Accept": "*/*", "Connection": "keep-alive"},
+)
+results["urllib-identity"] = try_urllib(
+    "urllib + Accept-Encoding: identity",
+    {"User-Agent": POLITE, "Accept": "*/*", "Accept-Encoding": "identity"},
+)
+
+print("\n=== B. raw http.client (exact curl header set on the wire) ===")
+results["raw-curl-clone"] = try_raw_httpclient("raw, curl's 3 headers", CURL_HEADERS)
+results["raw-polite"] = try_raw_httpclient("raw, polite UA", {**CURL_HEADERS, "User-Agent": POLITE})
+results["raw-with-conn-close"] = try_raw_httpclient(
+    "raw + Connection: close", {**CURL_HEADERS, "Connection": "close"}
+)
+results["raw-with-accept-encoding"] = try_raw_httpclient(
+    "raw + Accept-Encoding (urllib casing)",
+    {**CURL_HEADERS, "Accept-encoding": "identity"},
+    skip_accept_encoding=False,
+)
+
+print("\n=== C. requests / urllib3 ===")
+try:
+    subprocess.run(
+        ["pip", "install", "-q", "requests"], check=False, capture_output=True, timeout=120
     )
-    probe(
-        "no-sort",
-        base + "?" + urllib.parse.urlencode({k: v for k, v in FULL.items() if k != "sortBy"}),
-        PROFILES["profile0"],
-    )
-    probe(
-        "unencoded-space",
-        base + "?search_query=cat:quant-ph+OR+cat:cond-mat.supr-con&max_results=5",
-        PROFILES["profile0"],
-    )
+    import requests  # type: ignore[import-untyped]
 
-    print("\n=== 4. alternate endpoints ===")
-    probe("rss-quant-ph", "http://rss.arxiv.org/rss/quant-ph", PROFILES["profile0"])
-    probe("abs-page", "https://arxiv.org/abs/2401.00001", PROFILES["profile0"])
+    try:
+        r = requests.get(URL, timeout=30, headers={"User-Agent": POLITE})
+        results["requests"] = report("requests", r.status_code, f"{len(r.content)} bytes")
+    except Exception as e:  # noqa: BLE001
+        results["requests"] = report("requests", -1, f"{type(e).__name__}: {e}")
+except Exception as e:  # noqa: BLE001
+    print(f"  [SKIP] requests unavailable: {e}")
 
+print("\n=== D. curl binary ===")
+results["curl"] = try_curl("curl default")
+results["curl-polite-ua"] = try_curl("curl + polite UA", ["-A", POLITE])
+try:
+    v = subprocess.run(["curl", "--version"], capture_output=True, text=True, timeout=20)
+    print(f"  curl: {v.stdout.splitlines()[0] if v.stdout else '?'}")
+except Exception:
+    pass
 
-if __name__ == "__main__":
-    main()
+print("\n=== VERDICT ===")
+print(json.dumps({k: ("pass" if v else "fail") for k, v in results.items()}, indent=2))
