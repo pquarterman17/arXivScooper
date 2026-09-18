@@ -231,10 +231,16 @@ local proxy in `scq/server.py` that avoids CORS and sets a proper User-Agent hea
   GitHub Actions digest alive when the runner's egress IP is blocked or throttled
   on `arxiv.org`. Do NOT make `export.arxiv.org` the primary. Pin a single host
   with `SCQ_ARXIV_API_BASE` (comma-separated for an explicit ordered list).
-- Requests **must** send an `Accept` header. A bare `urllib` request (no `Accept`,
-  plain `http://`) is answered with **HTTP 406 Not Acceptable** by arXiv's edge —
-  this silently killed every scheduled digest from 2026-09-13 onward. Header
-  profiles live in `_HEADER_PROFILES`; 406/403/415 rotate to the next profile.
+- **HTTP 406 from `/api/query` is transient throttling, not a bad request.**
+  arXiv's edge rejects *every* client for windows of several minutes — measured
+  2026-09-18 from a runner: urllib, raw `http.client` sending curl's exact
+  headers, and any User-Agent all 406 together, then 45/45 requests succeed from
+  the same client minutes later. Changing headers does not help and is not the
+  fix; waiting is. `_THROTTLE_STATUSES` groups 403/406/415/429 so they all get
+  exponential backoff, and the retry ladder is sized to outlast a multi-minute
+  window. Do NOT "fix" a 406 by fiddling with `_HEADER_PROFILES`.
+  Run `python tools/arxiv_probe.py` (or the **arXiv API probe** workflow) to see
+  whether a window is open right now before chasing a regression.
 - If 429 rate-limit errors occur, wait a few minutes between searches.
 
 ## CI Pipeline

@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
-"""Round 4: how intermittent is the 406, and does retrying beat it?
+"""Is arXiv's API rejecting us right now?
 
-Round 3 overturned the fingerprint theory: the stdlib default SSL context
-passed after failing identically in rounds 1 and 2. So the 406 is transient,
-not a property of the client. That changes the fix from "send different
-headers" to "retry properly" - but only if the failure rate is low enough
-that a bounded retry actually converges. This measures it.
+Troubleshooting aid for the digest. arXiv's edge intermittently answers
+/api/query with HTTP 406 for windows of several minutes, rejecting every
+client equally (measured 2026-09-18: urllib, raw http.client with curl's
+exact headers, and any User-Agent all 406 together, then 45/45 succeed from
+the same client minutes later). The digest rides this out with backoff; this
+script tells you whether a window is open *now*, which is the first thing to
+check when a run fails.
 
-Run: python tools/arxiv_probe.py
+Exit 0 if any host answered, 1 if every attempt was rejected.
+
+Run: python tools/arxiv_probe.py [attempts]
 """
 
 from __future__ import annotations
 
-import json
-import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
+from scq.arxiv.search import _api_bases
+
 UA = "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
-HOSTS = {
-    "arxiv.org": "https://arxiv.org/api/query",
-    "export.arxiv.org": "https://export.arxiv.org/api/query",
-}
 QS = urllib.parse.urlencode({"search_query": "cat:quant-ph", "max_results": "1"})
-N = 15
 
 
-def one(url):
+def _status(url):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -36,59 +36,52 @@ def one(url):
             return r.status
     except urllib.error.HTTPError as e:
         return e.code
-    except Exception:  # noqa: BLE001
-        return -1
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}"
 
 
-summary = {}
-for host, base in HOSTS.items():
-    codes = []
-    for _i in range(N):
-        codes.append(one(f"{base}?{QS}"))
-        time.sleep(1)
-    ok = sum(1 for c in codes if c == 200)
-    summary[f"urllib {host}"] = f"{ok}/{N} ok  codes={codes}"
-    print(f"  urllib {host}: {ok}/{N} ok  {codes}")
+def main(argv=None):
+    argv = argv if argv is not None else sys.argv[1:]
+    attempts = int(argv[0]) if argv else 3
 
-# Does an immediate retry recover a 406, or does the block persist?
-print("\n=== immediate-retry recovery on export ===")
-recovered = attempts = 0
-for _i in range(10):
-    base = HOSTS["export.arxiv.org"]
-    if one(f"{base}?{QS}") != 200:
-        attempts += 1
-        for delay in (1, 2, 4):
-            time.sleep(delay)
-            if one(f"{base}?{QS}") == 200:
-                recovered += 1
-                break
-    time.sleep(1)
-summary["retry_recovery"] = f"{recovered}/{attempts} initial failures recovered within 3 retries"
-print(f"  {summary['retry_recovery']}")
+    any_ok = False
+    all_codes: list = []
+    for base in _api_bases():
+        host = urllib.parse.urlparse(base).netloc
+        codes = []
+        for i in range(attempts):
+            if i:
+                time.sleep(2)
+            codes.append(_status(f"{base}?{QS}"))
+        ok = sum(1 for c in codes if c == 200)
+        any_ok = any_ok or ok > 0
+        all_codes.extend(codes)
+        print(f"  {host}: {ok}/{attempts} ok  {codes}")
 
-print("\n=== requests, same volume ===")
-try:
-    subprocess.run(
-        ["pip", "install", "-q", "requests"], check=False, capture_output=True, timeout=120
-    )
-    import requests  # type: ignore[import-untyped]
+    if any_ok:
+        print("\narXiv is answering. A digest failure now is not this.")
+        return 0
 
-    codes = []
-    for _i in range(N):
-        try:
-            codes.append(
-                requests.get(
-                    f"{HOSTS['export.arxiv.org']}?{QS}", timeout=30, headers={"User-Agent": UA}
-                ).status_code
-            )
-        except Exception:  # noqa: BLE001
-            codes.append(-1)
-        time.sleep(1)
-    ok = sum(1 for c in codes if c == 200)
-    summary["requests export"] = f"{ok}/{N} ok  codes={codes}"
-    print(f"  requests: {ok}/{N} ok  {codes}")
-except Exception as e:  # noqa: BLE001
-    print(f"  [SKIP] {e}")
+    # Distinguish "arXiv said no" from "we never got there" — on a machine
+    # with no route to arxiv.org (a sandbox, an offline laptop) every attempt
+    # also fails, and calling that a rejection window would be a wrong answer.
+    if any(c == 406 for c in all_codes):
+        print(
+            "\nEvery attempt was rejected with 406 — a rejection window is open.\n"
+            "This clears on its own, usually within minutes. The digest retries\n"
+            "with backoff across both hosts; the next scheduled run recovers the\n"
+            "missed papers via the overlapping lookback window."
+        )
+    elif all(isinstance(c, str) for c in all_codes):
+        print(
+            "\nNo attempt reached arXiv at all (network error, not an HTTP\n"
+            "response). Check connectivity/proxy from this machine — this is\n"
+            "not the 406 rejection window."
+        )
+    else:
+        print(f"\nNo attempt succeeded. Codes seen: {sorted(set(map(str, all_codes)))}")
+    return 1
 
-print("\n=== VERDICT ===")
-print(json.dumps(summary, indent=2))
+
+if __name__ == "__main__":
+    sys.exit(main())
