@@ -37,6 +37,10 @@ from scq.arxiv.search import (
 # fresh checkout without the config system), we fall back to the same
 # constants the legacy code path used.
 
+# Distinct exit codes so CI can name the actual failure instead of guessing.
+EXIT_EMAIL_FAILED = 2  # papers fetched fine, SMTP delivery failed
+EXIT_FETCH_FAILED = 3  # never reached arXiv — nothing was sent, by design
+
 _DIGEST_DEFAULTS = {
     "maxPapers": None,  # None = no cap (matches legacy behavior)
     "lookbackDays": 3,  # legacy --days default
@@ -297,8 +301,9 @@ def main(argv=None):
     parser.add_argument(
         "--require-email",
         action="store_true",
-        help="Exit 2 if email fails or is skipped (for CI use). "
-        "Without this flag, email failure prints a warning but exits 0.",
+        help=f"Exit {EXIT_EMAIL_FAILED} if email fails (for CI use). "
+        "Without this flag, email failure prints a warning but exits 0. "
+        f"An arXiv fetch failure always exits {EXIT_FETCH_FAILED}.",
     )
     args = parser.parse_args(argv)
 
@@ -351,6 +356,10 @@ def main(argv=None):
                 f"ERROR: arXiv fetch failed - refusing to send an empty digest: {exc}",
                 file=sys.stderr,
             )
+            # Exit 3, not 2: a fetch failure and an email failure need
+            # different fixes, and conflating them sent the CI failure
+            # handler chasing Gmail app passwords for weeks while the real
+            # cause was arXiv rejecting the request (HTTP 406).
             _write_github_step_summary(
                 digest_date=digest_date,
                 n_fetched=0,
@@ -359,7 +368,7 @@ def main(argv=None):
                 email_status="failed",
                 artifact_run_id=os.environ.get("GITHUB_RUN_ID", ""),
             )
-            sys.exit(2)
+            sys.exit(EXIT_FETCH_FAILED)
 
     if papers:
         print(f"\nRanking {len(papers)} papers...")
@@ -433,7 +442,7 @@ def main(argv=None):
                     email_status=email_status,
                     artifact_run_id=os.environ.get("GITHUB_RUN_ID", ""),
                 )
-                sys.exit(2)
+                sys.exit(EXIT_EMAIL_FAILED)
 
     _write_github_step_summary(
         digest_date=digest_date,

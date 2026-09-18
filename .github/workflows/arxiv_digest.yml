@@ -99,7 +99,14 @@ jobs:
             DAYS=7
           fi
           echo "Looking back $DAYS day(s)"
-          python tools/arxiv_digest.py --days $DAYS --max-results 1000 --smart-weekend --require-email
+          # Capture the exit code so the failure handler can name the real
+          # cause: 3 = never reached arXiv, 2 = fetched but email failed.
+          set +e
+          python -u tools/arxiv_digest.py --days $DAYS --max-results 1000 --smart-weekend --require-email
+          rc=$?
+          set -e
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          exit $rc
 
       # Note: digests are no longer committed to the repo (2026-05-01).
       # They live as a 30-day workflow artifact (downloadable from the run
@@ -124,6 +131,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           VALIDATE_OUTCOME: ${{ steps.validate-secrets.outcome }}
           DIGEST_OUTCOME: ${{ steps.run-digest.outcome }}
+          DIGEST_EXIT_CODE: ${{ steps.run-digest.outputs.exit_code }}
         run: |
           # Ensure the digest-failure label exists (idempotent)
           gh label create "digest-failure" \
@@ -144,6 +152,26 @@ jobs:
           - SCQ_EMAIL_TO (recipient address)
 
           This usually happens after a repo recreate (filter-repo, transfer, etc).
+
+          Run: ${RUN_URL}
+          EOF
+          )
+          elif [ "$DIGEST_OUTCOME" = "failure" ] && [ "$DIGEST_EXIT_CODE" = "3" ]; then
+            TITLE="Digest pipeline: arXiv fetch failed"
+            BODY=$(cat <<EOF
+          The daily digest never got a usable response from the arXiv API, so
+          nothing was emailed. Email is fine — do not go regenerate the Gmail
+          App Password.
+
+          Possible causes:
+          - arXiv rejected the request (HTTP 406/403 — content negotiation or
+            a blocked client). Check the "Fetching from arXiv API" log lines.
+          - The runner egress IP is rate-limited (HTTP 429 storm)
+          - The 600s network budget was exhausted before any host answered
+
+          Both API hosts (arxiv.org, then export.arxiv.org) are tried before
+          this fires. Pin one with the SCQ_ARXIV_API_BASE env var if only one
+          is reachable.
 
           Run: ${RUN_URL}
           EOF

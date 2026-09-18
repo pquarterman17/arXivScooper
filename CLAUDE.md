@@ -224,8 +224,17 @@ local proxy in `scq/server.py` that avoids CORS and sets a proper User-Agent hea
 - **scq/server.py** exposes `/api/arxiv?<query>` which forwards to `https://arxiv.org/api/query?<query>`
 - Both `paper_scraper.html` and `paper_database.html` auto-detect localhost and route
   through the proxy. Falls back to CORS proxies (allorigins, corsproxy.io) then direct fetch.
-- `export.arxiv.org` is **unreachable** from the user's network (Fastly CDN routing issue).
-  All code uses `arxiv.org` instead. Do NOT switch back to `export.arxiv.org`.
+- `export.arxiv.org` is **unreachable** from the user's network (Fastly CDN routing issue),
+  so `arxiv.org` stays the *primary* host everywhere. The digest fetcher
+  (`scq/arxiv/search.py`) additionally keeps `export.arxiv.org` as a **failover**
+  host tried only after `arxiv.org` exhausts its retries — that is what keeps the
+  GitHub Actions digest alive when the runner's egress IP is blocked or throttled
+  on `arxiv.org`. Do NOT make `export.arxiv.org` the primary. Pin a single host
+  with `SCQ_ARXIV_API_BASE` (comma-separated for an explicit ordered list).
+- Requests **must** send an `Accept` header. A bare `urllib` request (no `Accept`,
+  plain `http://`) is answered with **HTTP 406 Not Acceptable** by arXiv's edge —
+  this silently killed every scheduled digest from 2026-09-13 onward. Header
+  profiles live in `_HEADER_PROFILES`; 406/403/415 rotate to the next profile.
 - If 429 rate-limit errors occur, wait a few minutes between searches.
 
 ## CI Pipeline
@@ -238,7 +247,9 @@ The GitHub Actions CI gate runs in three sequential stages:
 
 The **digest workflow** (`.github/workflows/digest.yml`) adds:
 - **Fail-fast secrets check** — validates `SCQ_EMAIL_FROM`, `SCQ_EMAIL_APP_PASSWORD`, `SCQ_EMAIL_TO` are non-empty before running
-- **`--require-email` flag** on the digest script — exits 2 if email fails (CI-safe)
+- **`--require-email` flag** on the digest script — exits 2 if email fails (CI-safe).
+  An arXiv fetch failure exits **3** instead, so the failure handler can say
+  "arXiv fetch failed" rather than blaming Gmail.
 - **GitHub Actions job summary** — writes paper counts + email status to the run summary page
 - **Self-healing on failure** — auto-opens a GitHub Issue labelled `digest-failure` with diagnosis + fix instructions
 
