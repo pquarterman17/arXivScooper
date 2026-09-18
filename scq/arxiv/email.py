@@ -122,8 +122,77 @@ def _load_email_recipients():
     return recipients
 
 
-def send_email_digest(papers, digest_date, frequency="daily"):
-    """Send a summary email with top papers and quick-action links."""
+def _empty_digest_bodies(digest_date, context):
+    """Compose the HTML + plain bodies for a run that found nothing.
+
+    This mail exists to keep silence meaningful. Without it, "no email in my
+    inbox" means either "arXiv was quiet" or "the pipeline is broken" — and
+    for weeks in Sept 2026 it meant the latter while looking like the former.
+    So it reports what was actually checked, not just that nothing turned up.
+    """
+    ctx = context or {}
+    categories = ctx.get("categories") or list(ARXIV_CATEGORIES)
+    rows = [
+        ("Lookback window", f"{ctx['lookback_days']} day(s)") if ctx.get("lookback_days") else None,
+        ("Papers fetched", str(ctx["fetched"])) if ctx.get("fetched") is not None else None,
+        (
+            "Already emailed (deduped)",
+            str(ctx["deduped"]),
+        )
+        if ctx.get("deduped") is not None
+        else None,
+        (
+            "Below relevance floor",
+            f"{ctx['filtered']} (min score {ctx.get('min_score', 0)})",
+        )
+        if ctx.get("filtered") is not None
+        else None,
+    ]
+    rows = [r for r in rows if r]
+
+    rows_html = "".join(
+        f'<tr><td style="padding: 4px 12px 4px 0; color: #666;">{label}</td>'
+        f'<td style="padding: 4px 0; font-weight: 600;">{value}</td></tr>'
+        for label, value in rows
+    )
+    body_html = f"""
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+  <h2 style="color: #1a73e8;">SCQ arXiv Digest &mdash; {digest_date}</h2>
+  <p style="color: #666;">No new papers cleared your filters in this window. The
+  pipeline ran fine &mdash; there was simply nothing new to send.</p>
+  <table style="font-size: 13px; border-collapse: collapse; margin: 16px 0;">{rows_html}</table>
+  <hr style="border: none; border-top: 1px solid #ddd;">
+  <p style="font-size: 12px; color: #777;">
+    You get this note so that an empty inbox always means something broke, never
+    that arXiv was quiet. Turn it off with <code>sendWhenEmpty: false</code> in
+    <code>data/user_config/digest.json</code>.
+  </p>
+  <p style="font-size: 11px; color: #999; text-align: center;">
+    Categories: {", ".join(categories)}
+  </p>
+</div>
+"""
+
+    plain = f"SCQ arXiv Digest - {digest_date}\n\n"
+    plain += "No new papers cleared your filters in this window. The pipeline ran\n"
+    plain += "fine - there was simply nothing new to send.\n\n"
+    for label, value in rows:
+        plain += f"  {label}: {value}\n"
+    plain += f"\n  Categories: {', '.join(categories)}\n"
+    plain += "\nYou get this note so that an empty inbox always means something\n"
+    plain += "broke, never that arXiv was quiet. Turn it off with\n"
+    plain += "sendWhenEmpty: false in data/user_config/digest.json.\n"
+    return body_html, plain
+
+
+def send_email_digest(papers, digest_date, frequency="daily", context=None):
+    """Send a summary email with top papers and quick-action links.
+
+    With an empty ``papers`` list this sends the short "nothing new" note from
+    :func:`_empty_digest_bodies` instead. ``context`` is an optional dict of
+    run stats (``lookback_days``, ``fetched``, ``deduped``, ``filtered``,
+    ``min_score``, ``categories``) used to explain what was checked.
+    """
     if not EMAIL_FROM or not EMAIL_APP_PASSWORD:
         print("  Email skipped: set SCQ_EMAIL_FROM and SCQ_EMAIL_APP_PASSWORD env vars")
         print("  (Use a Gmail App Password: https://myaccount.google.com/apppasswords)")
@@ -138,6 +207,11 @@ def send_email_digest(papers, digest_date, frequency="daily"):
 
     top_papers = [p for p in papers if p["relevance_score"] >= 5][:15]
     starred = [p for p in top_papers if p["relevance_score"] >= 20]
+
+    if not papers:
+        body_html, plain = _empty_digest_bodies(digest_date, context)
+        subject = f"SCQ Digest: no new papers - {digest_date}"
+        return _deliver(recipients, subject, plain, body_html)
 
     # Build email body with quick-action links
     body_html = f"""
@@ -191,10 +265,16 @@ def send_email_digest(papers, digest_date, frequency="daily"):
         plain += f"    {p['short_authors']} — {p['abs_url']}\n\n"
     plain += f"\nOpen digests/digest_{digest_date}.html to triage papers.\n"
 
+    subject = f"SCQ Digest: {len(top_papers)} relevant papers — {digest_date}"
+    return _deliver(recipients, subject, plain, body_html)
+
+
+def _deliver(recipients, subject, plain, body_html):
+    """Send one composed message to every recipient. True if any got through."""
     sent_count = 0
     for recipient in recipients:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"SCQ Digest: {len(top_papers)} relevant papers — {digest_date}"
+        msg["Subject"] = subject
         msg["From"] = EMAIL_FROM
         msg["To"] = recipient["email"]
 

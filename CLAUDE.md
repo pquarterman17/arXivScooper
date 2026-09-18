@@ -247,6 +247,10 @@ The GitHub Actions CI gate runs in three sequential stages:
 
 The **digest workflow** (`.github/workflows/digest.yml`) adds:
 - **Fail-fast secrets check** — validates `SCQ_EMAIL_FROM`, `SCQ_EMAIL_APP_PASSWORD`, `SCQ_EMAIL_TO` are non-empty before running
+- **Empty runs still email.** A run that finds nothing sends a short
+  "no new papers" note listing what was checked, so an empty inbox always means
+  the pipeline broke rather than "arXiv was quiet". Controlled by
+  `digest.sendWhenEmpty` (default `true`) or `--no-empty-email`.
 - **`--require-email` flag** on the digest script — exits 2 if email fails (CI-safe).
   An arXiv fetch failure exits **3** instead, so the failure handler can say
   "arXiv fetch failed" rather than blaming Gmail.
