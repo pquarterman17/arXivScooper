@@ -37,11 +37,18 @@ from scq.arxiv.search import (
 # fresh checkout without the config system), we fall back to the same
 # constants the legacy code path used.
 
+# Distinct exit codes so CI can name the actual failure instead of guessing.
+EXIT_EMAIL_FAILED = 2  # papers fetched fine, SMTP delivery failed
+EXIT_FETCH_FAILED = 3  # never reached arXiv — nothing was sent, by design
+
 _DIGEST_DEFAULTS = {
     "maxPapers": None,  # None = no cap (matches legacy behavior)
     "lookbackDays": 3,  # legacy --days default
     "minRelevanceScore": 0,  # 0 = no filtering (legacy "send everything ranked")
     "includeSources": [],  # empty = all enabled (matches schema description)
+    # Send a short "nothing new" note on an empty run, so that no email in the
+    # inbox always means the pipeline broke rather than "arXiv was quiet".
+    "sendWhenEmpty": True,
 }
 
 
@@ -69,6 +76,7 @@ def _load_digest_config():
             "lookbackDays": _coerce("lookbackDays"),
             "minRelevanceScore": _coerce("minRelevanceScore"),
             "includeSources": _coerce("includeSources"),
+            "sendWhenEmpty": _coerce("sendWhenEmpty"),
         }
     except Exception as e:  # noqa: BLE001 — keep the workflow robust
         print(f"  [config] digest config unreadable, using defaults: {e}")
@@ -217,11 +225,11 @@ def _write_github_step_summary(
         return
 
     if email_status == "sent":
-        email_line = "Sent"
+        email_line = "Sent" if n_digest else "Sent (nothing-new note)"
     elif email_status == "failed":
         email_line = "**Failed** (check SMTP secrets)"
     else:
-        email_line = "Skipped (`--no-email` or secrets absent)"
+        email_line = "Skipped (`--no-email`, or empty run with `sendWhenEmpty` off)"
 
     artifact_note = (
         f"[Download artifact](https://github.com/pquarterman17/arXivScooper/"
@@ -295,10 +303,19 @@ def main(argv=None):
         "Leaves runway under the GH Actions 15-min job timeout.",
     )
     parser.add_argument(
+        "--no-empty-email",
+        dest="send_when_empty",
+        action="store_false",
+        default=None,
+        help="Do not send the short 'no new papers' note on an empty run. "
+        "Defaults to digest.sendWhenEmpty.",
+    )
+    parser.add_argument(
         "--require-email",
         action="store_true",
-        help="Exit 2 if email fails or is skipped (for CI use). "
-        "Without this flag, email failure prints a warning but exits 0.",
+        help=f"Exit {EXIT_EMAIL_FAILED} if email fails (for CI use). "
+        "Without this flag, email failure prints a warning but exits 0. "
+        f"An arXiv fetch failure always exits {EXIT_FETCH_FAILED}.",
     )
     args = parser.parse_args(argv)
 
@@ -309,6 +326,11 @@ def main(argv=None):
     days_back = args.days if args.days is not None else digest_cfg["lookbackDays"]
     max_papers = args.max_papers if args.max_papers is not None else digest_cfg["maxPapers"]
     min_score = args.min_score if args.min_score is not None else digest_cfg["minRelevanceScore"]
+    send_when_empty = (
+        args.send_when_empty
+        if args.send_when_empty is not None
+        else bool(digest_cfg["sendWhenEmpty"])
+    )
 
     # Set the network deadline. Anything in _arxiv_get that would push past
     # this aborts cleanly with a logged warning. 0/negative disables.
@@ -351,6 +373,10 @@ def main(argv=None):
                 f"ERROR: arXiv fetch failed - refusing to send an empty digest: {exc}",
                 file=sys.stderr,
             )
+            # Exit 3, not 2: a fetch failure and an email failure need
+            # different fixes, and conflating them sent the CI failure
+            # handler chasing Gmail app passwords for weeks while the real
+            # cause was arXiv rejecting the request (HTTP 406).
             _write_github_step_summary(
                 digest_date=digest_date,
                 n_fetched=0,
@@ -359,8 +385,9 @@ def main(argv=None):
                 email_status="failed",
                 artifact_run_id=os.environ.get("GITHUB_RUN_ID", ""),
             )
-            sys.exit(2)
+            sys.exit(EXIT_FETCH_FAILED)
 
+    fetched_count = len(papers)
     if papers:
         print(f"\nRanking {len(papers)} papers...")
         papers = rank_papers(papers)
@@ -371,10 +398,12 @@ def main(argv=None):
     # same papers. Skipped in --test so the suite never touches the
     # committed state file.
     sent_ids = {}
+    deduped_count = 0
     if not args.test:
         sent_ids = _state.load_sent_ids()
         before_dedup = len(papers)
         papers = _state.filter_unsent(papers, sent_ids)
+        deduped_count = before_dedup - len(papers)
         if before_dedup != len(papers):
             print(
                 f"  Dedup dropped {before_dedup - len(papers)} paper(s) "
@@ -396,24 +425,42 @@ def main(argv=None):
     digest_path = os.path.join(DIGEST_DIR, f"digest_{digest_date}.html")
     generate_html_digest(papers, digest_date, digest_path)
 
-    # Send email. Three outcomes, kept distinct on purpose:
-    #   - no new papers   → skip the email entirely (no empty-inbox noise);
-    #                        the run still succeeds and the artifact records it.
+    # Send email. Outcomes, kept distinct on purpose:
     #   - papers to send  → email, then persist the sent IDs so the next
     #                        overlapping-window run won't repeat them.
+    #   - no new papers   → still email, but the short "nothing new" note, so
+    #                        an empty inbox always means the pipeline broke
+    #                        rather than "arXiv was quiet". Nothing to record.
+    #   - no new papers
+    #     + sendWhenEmpty
+    #       turned off     → skip (the old always-silent behaviour).
     #   - --no-email      → skip (HTML/artifact only).
     email_status = "skipped"
-    if not papers:
-        print("  No new papers to send - skipping email (run still recorded).")
-    elif args.no_email:
+    if args.no_email:
         print("  Email skipped (--no-email)")
+    elif not papers and not send_when_empty:
+        print("  No new papers and sendWhenEmpty is off - skipping email.")
     else:
-        ok = send_email_digest(papers, digest_date)
+        if not papers:
+            print("  No new papers - sending the 'nothing new' note.")
+        ok = send_email_digest(
+            papers,
+            digest_date,
+            context={
+                "lookback_days": days_back,
+                "fetched": fetched_count,
+                "deduped": deduped_count,
+                "filtered": pre_filter - len(papers),
+                "min_score": min_score,
+                "categories": categories,
+            },
+        )
         if ok:
             email_status = "sent"
             # Record sent IDs only after a confirmed send, so a delivery
-            # failure leaves the papers eligible for the next run.
-            if not args.test:
+            # failure leaves the papers eligible for the next run. An empty
+            # run has nothing to record.
+            if papers and not args.test:
                 _state.record_sent(papers, sent_ids, date_str=digest_date)
                 _state.prune(sent_ids)
                 state_file = _state.save_sent_ids(sent_ids)
@@ -433,7 +480,7 @@ def main(argv=None):
                     email_status=email_status,
                     artifact_run_id=os.environ.get("GITHUB_RUN_ID", ""),
                 )
-                sys.exit(2)
+                sys.exit(EXIT_EMAIL_FAILED)
 
     _write_github_step_summary(
         digest_date=digest_date,

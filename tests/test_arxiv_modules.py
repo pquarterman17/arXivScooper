@@ -323,7 +323,17 @@ def test_load_digest_config_pulls_from_loader(monkeypatch):
         "maxPapers": 25,
         "minRelevanceScore": 5,
         "includeSources": ["arxiv", "prl"],
+        # Absent from the user config, so the ship default fills in.
+        "sendWhenEmpty": True,
     }
+
+
+def test_load_digest_config_honors_send_when_empty_false(monkeypatch):
+    class FakeResult:
+        data = {"lookbackDays": 1, "sendWhenEmpty": False}
+
+    monkeypatch.setattr("scq.config.user.load_config", lambda _d: FakeResult())
+    assert digest_mod._load_digest_config()["sendWhenEmpty"] is False
 
 
 def test_load_search_categories_uses_loader_result(monkeypatch):
@@ -416,3 +426,126 @@ def test_max_papers_zero_rejected():
 def test_max_papers_negative_rejected():
     with pytest.raises(SystemExit):
         digest_mod.main(["--test", "--no-email", "--max-papers", "-1"])
+
+
+# ─── Empty-run email: silence must always mean "broken" ────────────
+#
+# Before this, a run that found nothing skipped the email and exited 0, so
+# "no email in my inbox" meant either "arXiv was quiet" or "the pipeline is
+# broken" — indistinguishable, and for weeks in Sept 2026 it was the latter.
+# An empty run now sends a short nothing-new note unless sendWhenEmpty is off.
+
+
+def _run_digest_capturing_email(monkeypatch, papers, extra_argv=(), cfg=None):
+    """Run digest.main() with the network + SMTP stubbed; return the email call."""
+    calls = []
+
+    def fake_send(sent_papers, digest_date, frequency="daily", context=None):
+        calls.append(
+            {
+                "papers": sent_papers,
+                "digest_date": digest_date,
+                "context": context,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(digest_mod, "send_email_digest", fake_send)
+    monkeypatch.setattr(digest_mod, "fetch_arxiv_papers", lambda *_a, **_kw: list(papers))
+    monkeypatch.setattr(digest_mod, "rank_papers", lambda ps: ps)
+    monkeypatch.setattr(digest_mod, "generate_html_digest", lambda *_a, **_kw: None)
+    monkeypatch.setattr(digest_mod._state, "load_sent_ids", lambda: {})
+    monkeypatch.setattr(digest_mod._state, "filter_unsent", lambda ps, _s: ps)
+    monkeypatch.setattr(digest_mod._state, "record_sent", lambda *_a, **_kw: None)
+    monkeypatch.setattr(digest_mod._state, "prune", lambda *_a, **_kw: None)
+    monkeypatch.setattr(digest_mod._state, "save_sent_ids", lambda *_a, **_kw: "state.json")
+    monkeypatch.setattr(digest_mod, "_load_digest_config", lambda: cfg or dict(base_cfg))
+    monkeypatch.setattr(digest_mod, "_load_search_categories", lambda: ["quant-ph"])
+    monkeypatch.setattr(digest_mod.os, "makedirs", lambda *_a, **_kw: None)
+
+    digest_mod.main(["--days", "3", *extra_argv])
+    return calls
+
+
+base_cfg = {
+    "maxPapers": None,
+    "lookbackDays": 3,
+    "minRelevanceScore": 0,
+    "includeSources": [],
+    "sendWhenEmpty": True,
+}
+
+
+def test_empty_run_still_sends_the_nothing_new_note(monkeypatch):
+    calls = _run_digest_capturing_email(monkeypatch, [])
+    assert len(calls) == 1, "an empty run must still email, or silence is ambiguous"
+    assert calls[0]["papers"] == []
+
+
+def test_empty_run_note_reports_what_was_checked(monkeypatch):
+    calls = _run_digest_capturing_email(monkeypatch, [])
+    ctx = calls[0]["context"]
+    assert ctx["lookback_days"] == 3
+    assert ctx["fetched"] == 0
+    assert ctx["categories"] == ["quant-ph"]
+
+
+def test_send_when_empty_false_restores_the_silent_skip(monkeypatch):
+    cfg = dict(base_cfg, sendWhenEmpty=False)
+    assert _run_digest_capturing_email(monkeypatch, [], cfg=cfg) == []
+
+
+def test_no_empty_email_flag_overrides_config(monkeypatch):
+    assert _run_digest_capturing_email(monkeypatch, [], extra_argv=["--no-empty-email"]) == []
+
+
+def test_no_email_flag_still_wins_over_send_when_empty(monkeypatch):
+    assert _run_digest_capturing_email(monkeypatch, [], extra_argv=["--no-email"]) == []
+
+
+def test_empty_run_does_not_record_sent_state(monkeypatch):
+    """Nothing was sent, so nothing may enter the dedup state."""
+    recorded = []
+    monkeypatch.setattr(
+        digest_mod._state, "record_sent", lambda *a, **k: recorded.append(a)
+    )
+    _run_digest_capturing_email(monkeypatch, [])
+    assert recorded == []
+
+
+# ─── The composed nothing-new message ──────────────────────────────
+
+
+def test_empty_digest_bodies_state_the_pipeline_is_healthy():
+    html, plain = email_mod._empty_digest_bodies(
+        "2026-09-18",
+        {"lookback_days": 7, "fetched": 120, "deduped": 120, "filtered": 0, "min_score": 5},
+    )
+    for body in (html, plain):
+        assert "2026-09-18" in body
+        assert "7 day(s)" in body
+        assert "120" in body
+        assert "sendWhenEmpty" in body, "must say how to turn the note off"
+
+
+def test_empty_digest_bodies_survive_missing_context():
+    html, plain = email_mod._empty_digest_bodies("2026-09-18", None)
+    assert "2026-09-18" in html and "2026-09-18" in plain
+
+
+def test_send_email_digest_uses_a_distinct_subject_when_empty(monkeypatch):
+    """A filterable subject — these notes should be easy to route or mute."""
+    sent = []
+    monkeypatch.setattr(email_mod, "EMAIL_FROM", "a@b.test")
+    monkeypatch.setattr(email_mod, "EMAIL_APP_PASSWORD", "pw")
+    monkeypatch.setattr(
+        email_mod,
+        "_load_email_recipients",
+        lambda: [{"email": "to@b.test", "name": "", "frequency": "daily"}],
+    )
+    monkeypatch.setattr(
+        email_mod, "_deliver", lambda r, subject, p, h: sent.append(subject) or True
+    )
+
+    assert email_mod.send_email_digest([], "2026-09-18") is True
+    assert sent == ["SCQ Digest: no new papers - 2026-09-18"]
