@@ -123,3 +123,44 @@ def test_still_raises_when_both_the_api_and_rss_are_empty():
     with patch.object(arxiv_search, "_arxiv_get", lambda *_a, **_kw: None):
         with pytest.raises(arxiv_search.ArxivFetchError):
             arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=3, max_results=10)
+
+
+def test_rss_fallback_runs_even_when_the_api_spent_the_whole_budget():
+    """Regression for run 149: the fallback must not inherit a spent budget.
+
+    The API burning all 600s is the exact case the fallback exists for, so
+    sharing that budget made it abort before issuing a single request.
+    """
+    feed = _rss([("2609.00007", "Recovered", "A. Smith", "quant-ph", TODAY)])
+
+    def fake_urlopen(req, timeout=None):
+        if "rss.arxiv.org" not in req.full_url:
+            raise AssertionError("API should not be reached in this test")
+
+        class _Resp:
+            status = 200
+            headers = {}
+
+            def read(self):
+                return feed
+
+        return _Resp()
+
+    try:
+        arxiv_search.set_budget(0)  # budget already exhausted
+        with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+            papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=3, max_results=10)
+    finally:
+        arxiv_search.set_budget(None)
+
+    assert [p["id"] for p in papers] == ["2609.00007"]
+
+
+def test_reserve_budget_restores_the_outer_deadline():
+    """The extension is scoped: it must not leak past the fallback."""
+    arxiv_search.set_budget(0)
+    spent = arxiv_search._budget_remaining()
+    with arxiv_search._reserve_budget(60):
+        assert arxiv_search._budget_remaining() > 30
+    assert arxiv_search._budget_remaining() <= spent
+    arxiv_search.set_budget(None)

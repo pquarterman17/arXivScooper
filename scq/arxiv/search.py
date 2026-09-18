@@ -472,6 +472,30 @@ def _clamp_wait(wait):
     return min(wait, rem)
 
 
+# Wall-clock reserved for the RSS fallback, on top of whatever the API spent.
+# The fallback exists for the case where the API burned the entire budget, so
+# it cannot share that budget — it needs its own.
+_FALLBACK_BUDGET = 90
+
+
+@contextlib.contextmanager
+def _reserve_budget(seconds):
+    """Grant a fresh deadline for a nested block, even if the budget is spent.
+
+    The opposite of :func:`_sub_budget`: this *extends*. Used only for the RSS
+    fallback, which runs precisely when the API has exhausted the budget — it
+    would otherwise abort before issuing a single request, which is exactly
+    what happened on run 149.
+    """
+    global _BUDGET_DEADLINE
+    previous = _BUDGET_DEADLINE
+    _BUDGET_DEADLINE = time.monotonic() + seconds
+    try:
+        yield
+    finally:
+        _BUDGET_DEADLINE = previous
+
+
 @contextlib.contextmanager
 def _sub_budget(seconds):
     """Temporarily tighten the wall-clock deadline for a nested block.
@@ -615,7 +639,8 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
         try:
             from scq.arxiv.rss import fetch_rss_papers
 
-            rss_papers = fetch_rss_papers(categories, days_back=days_back)
+            with _reserve_budget(_FALLBACK_BUDGET):
+                rss_papers = fetch_rss_papers(categories, days_back=days_back)
         except Exception as e:  # noqa: BLE001 — fallback must not mask the real error
             print(f"  Warning: RSS fallback failed: {e}")
             rss_papers = []
