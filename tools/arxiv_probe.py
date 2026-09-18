@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
-"""Round 3: is the arXiv /api/query 406 a TLS-handshake fingerprint?
+"""Round 4: how intermittent is the 406, and does retrying beat it?
 
-Rounds 1-2 established:
-  - urllib 406s with every header profile, including curl's exact set
-  - raw http.client sending curl's 3 headers byte-for-byte still 406s
-  - requests (urllib3) and the curl binary both get 200
-
-Identical headers, different outcome, both Python => the rejection keys on
-the TLS ClientHello, not on HTTP. urllib3 and curl both negotiate ALPN;
-stdlib ssl.create_default_context() does not. This tests that directly, so
-the fix can stay on the stdlib if a plain SSLContext tweak is enough.
+Round 3 overturned the fingerprint theory: the stdlib default SSL context
+passed after failing identically in rounds 1 and 2. So the 406 is transient,
+not a property of the client. That changes the fix from "send different
+headers" to "retry properly" - but only if the failure rate is low enough
+that a bounded retry actually converges. This measures it.
 
 Run: python tools/arxiv_probe.py
 """
@@ -17,72 +13,82 @@ Run: python tools/arxiv_probe.py
 from __future__ import annotations
 
 import json
-import ssl
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-URL = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(
-    {"search_query": "cat:quant-ph", "max_results": "1"}
-)
 UA = "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
+HOSTS = {
+    "arxiv.org": "https://arxiv.org/api/query",
+    "export.arxiv.org": "https://export.arxiv.org/api/query",
+}
+QS = urllib.parse.urlencode({"search_query": "cat:quant-ph", "max_results": "1"})
+N = 15
 
 
-def attempt(label, ctx):
-    req = urllib.request.Request(URL, headers={"User-Agent": UA, "Accept": "*/*"})
+def one(url):
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
     try:
-        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
-            body = r.read()
-            print(f"  [OK  ] {label}: {r.status}, {len(body)} bytes")
-            return True
+        with urllib.request.urlopen(req, timeout=30) as r:
+            r.read()
+            return r.status
     except urllib.error.HTTPError as e:
-        print(f"  [FAIL] {label}: {e.code} {e.reason}")
-        return False
-    except Exception as e:  # noqa: BLE001
-        print(f"  [ERR ] {label}: {type(e).__name__}: {e}")
-        return False
+        return e.code
+    except Exception:  # noqa: BLE001
+        return -1
 
 
-results = {}
+summary = {}
+for host, base in HOSTS.items():
+    codes = []
+    for _i in range(N):
+        codes.append(one(f"{base}?{QS}"))
+        time.sleep(1)
+    ok = sum(1 for c in codes if c == 200)
+    summary[f"urllib {host}"] = f"{ok}/{N} ok  codes={codes}"
+    print(f"  urllib {host}: {ok}/{N} ok  {codes}")
 
-print("=== control ===")
-results["default-context"] = attempt("stdlib default context", ssl.create_default_context())
+# Does an immediate retry recover a 406, or does the block persist?
+print("\n=== immediate-retry recovery on export ===")
+recovered = attempts = 0
+for _i in range(10):
+    base = HOSTS["export.arxiv.org"]
+    if one(f"{base}?{QS}") != 200:
+        attempts += 1
+        for delay in (1, 2, 4):
+            time.sleep(delay)
+            if one(f"{base}?{QS}") == 200:
+                recovered += 1
+                break
+    time.sleep(1)
+summary["retry_recovery"] = f"{recovered}/{attempts} initial failures recovered within 3 retries"
+print(f"  {summary['retry_recovery']}")
 
-print("\n=== ALPN variants ===")
-ctx = ssl.create_default_context()
-ctx.set_alpn_protocols(["http/1.1"])
-results["alpn-http11"] = attempt("ALPN http/1.1", ctx)
-
-ctx = ssl.create_default_context()
-ctx.set_alpn_protocols(["h2", "http/1.1"])
-results["alpn-h2-http11"] = attempt("ALPN h2,http/1.1", ctx)
-
-print("\n=== ALPN + urllib3-ish ciphers ===")
-URLLIB3_CIPHERS = (
-    "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:ECDH+AESGCM:"
-    "DH+AESGCM:ECDH+AES:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!eNULL:!MD5:!DSS"
-)
-try:
-    ctx = ssl.create_default_context()
-    ctx.set_alpn_protocols(["http/1.1"])
-    ctx.set_ciphers(URLLIB3_CIPHERS)
-    results["alpn-plus-ciphers"] = attempt("ALPN + urllib3 ciphers", ctx)
-except Exception as e:  # noqa: BLE001
-    print(f"  [ERR ] cipher set failed: {e}")
-
-print("\n=== references ===")
+print("\n=== requests, same volume ===")
 try:
     subprocess.run(
         ["pip", "install", "-q", "requests"], check=False, capture_output=True, timeout=120
     )
     import requests  # type: ignore[import-untyped]
 
-    r = requests.get(URL, timeout=30, headers={"User-Agent": UA})
-    print(f"  [{'OK  ' if r.status_code == 200 else 'FAIL'}] requests: {r.status_code}")
-    results["requests"] = r.status_code == 200
+    codes = []
+    for _i in range(N):
+        try:
+            codes.append(
+                requests.get(
+                    f"{HOSTS['export.arxiv.org']}?{QS}", timeout=30, headers={"User-Agent": UA}
+                ).status_code
+            )
+        except Exception:  # noqa: BLE001
+            codes.append(-1)
+        time.sleep(1)
+    ok = sum(1 for c in codes if c == 200)
+    summary["requests export"] = f"{ok}/{N} ok  codes={codes}"
+    print(f"  requests: {ok}/{N} ok  {codes}")
 except Exception as e:  # noqa: BLE001
-    print(f"  [ERR ] requests: {e}")
+    print(f"  [SKIP] {e}")
 
 print("\n=== VERDICT ===")
-print(json.dumps({k: ("pass" if v else "fail") for k, v in results.items()}, indent=2))
+print(json.dumps(summary, indent=2))
