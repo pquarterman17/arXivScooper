@@ -163,22 +163,16 @@ jobs:
           nothing was emailed. Email is fine — do not go regenerate the Gmail
           App Password.
 
-          Most likely: an arXiv rejection window. Its edge 406s every client
-          for minutes at a time, then recovers on its own. The digest already
-          retries with exponential backoff across both hosts, so this issue
-          means the window outlasted the 600s network budget.
+          This now means BOTH sources failed: the Atom API (/api/query) and
+          the RSS feeds it falls back to. That is rare - through the
+          2026-09-18 API outage, RSS stayed up and carried the digest.
 
           What to do: usually nothing. The next scheduled run recovers the
-          missed papers via the overlapping 7-day lookback window.
+          missed papers via the overlapping lookback window.
 
-          To check whether a window is open right now, run the "arXiv API
-          probe" workflow. Do not change request headers - that is not the
-          cause; this was diagnosed on 2026-09-18 and headers make no
-          difference.
-
-          Other possibilities: a 429 storm on the runner egress IP, or arXiv
-          being down. Pin a single host with SCQ_ARXIV_API_BASE if only one
-          is reachable from your network.
+          To see which source is down, run the "arXiv API probe" workflow.
+          Do NOT change request headers or shrink max_results - both were
+          measured on 2026-09-18 and neither is ever the cause.
 
           Run: ${RUN_URL}
           EOF
