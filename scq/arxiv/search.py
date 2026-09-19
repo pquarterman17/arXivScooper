@@ -226,7 +226,10 @@ _ARXIV_MAX_PER_REQUEST = 2000
 # and wasted the 600s wall-clock budget; 6 attempts with the larger backoff
 # cap lets a single request outlast a throttle window while the budget guard
 # still prevents the runner from overrunning its timeout.
-_DEFAULT_MAX_RETRIES = 6
+# 8 attempts on the 5*2^n ladder (capped at _MAX_BACKOFF) spans roughly
+# 8 minutes of backoff, which covers the multi-minute 406 windows measured on
+# 2026-09-18. The wall-clock budget still bounds the total.
+_DEFAULT_MAX_RETRIES = 8
 # Floor on the budget slice handed to a single API host, so slicing never
 # starves a host below one connect+read round trip.
 _MIN_HOST_BUDGET = 30
@@ -356,14 +359,20 @@ def _budget_exceeded():
 # HTTP statuses that mean "this host/client combination was rejected" rather
 # than "try again later". They are retryable, but only after swapping to the
 # next header profile — waiting longer with identical headers never helps.
-_NEGOTIATION_STATUSES = frozenset({403, 406, 415})
+# Statuses arXiv's edge returns when it is shedding load rather than
+# answering. Measured 2026-09-18 from a GitHub Actions runner: the endpoint
+# 406s *every* request - urllib, raw http.client with curl's exact headers,
+# any User-Agent - for windows of several minutes, then serves 45/45 requests
+# fine from the same client minutes later. So a 406 here is a "come back
+# later", exactly like a 429, and the only thing that beats it is waiting.
+_THROTTLE_STATUSES = frozenset({403, 406, 415, 429})
 
 
 def _read_body(resp):
     """Return the response body, transparently gunzipping when needed.
 
-    We advertise ``Accept-Encoding: gzip`` (a bare ``identity`` request is one
-    of the signals that gets us 406'd), so we have to be able to decode it.
+    We advertise ``Accept-Encoding: gzip`` in the primary header profile, so
+    we have to be able to decode it.
     """
     body = resp.read()
     encoding = ""
@@ -384,21 +393,18 @@ def _read_body(resp):
 def _arxiv_get(url, label, max_retries=_DEFAULT_MAX_RETRIES):
     """Fetch a URL from arXiv with polite retries.
 
-    Retries on HTTP 429, 5xx, socket timeouts, and transient URL errors. Honors
-    the server's Retry-After header when present; otherwise uses exponential
-    backoff with jitter, capped at _MAX_BACKOFF.
-
-    Content-negotiation rejections (403/406/415) are retried too, but by
-    rotating to the next entry in :data:`_HEADER_PROFILES` after a short pause
-    instead of backing off — a 406 is a statement about the request, not the
-    server's load. Once every profile has been rejected we give up on this URL
-    immediately so the caller can fail over to the next host.
+    Retries on the throttle statuses (403/406/415/429), 5xx, socket timeouts,
+    and transient URL errors. Honors the server's Retry-After header when
+    present; otherwise uses exponential backoff with jitter, capped at
+    _MAX_BACKOFF, so a single request can outlast a multi-minute rejection
+    window. The header profile is rotated on each throttled retry as a free
+    second chance, but rotating is *not* the strategy — waiting is, and
+    running out of profiles never ends the retry loop.
 
     Aborts (returns None) if the wall-clock budget set in main() is exhausted —
     so a slow/hung arXiv can't run the GH Actions job clock out.
     """
     profile_idx = 0
-    profiles_tried = 1
     for attempt in range(max_retries):
         if _budget_exceeded():
             print(f"  Aborting {label}: time budget exhausted")
@@ -411,32 +417,12 @@ def _arxiv_get(url, label, max_retries=_DEFAULT_MAX_RETRIES):
             resp = urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT)
             return _read_body(resp)
         except urllib.error.HTTPError as e:
-            negotiation = e.code in _NEGOTIATION_STATUSES
-            retryable = negotiation or e.code == 429 or 500 <= e.code < 600
-            # A negotiation failure is only worth retrying while we still have
-            # an untried header profile to offer.
-            if negotiation and profiles_tried >= len(_HEADER_PROFILES):
-                print(
-                    f"  Warning: Failed to fetch {label}: {e} "
-                    f"(all {len(_HEADER_PROFILES)} header profiles rejected)"
-                )
-                return None
+            retryable = e.code in _THROTTLE_STATUSES or 500 <= e.code < 600
             if not retryable or attempt == max_retries - 1:
                 print(f"  Warning: Failed to fetch {label}: {e}")
                 return None
-            if negotiation:
+            if e.code in _THROTTLE_STATUSES:
                 profile_idx = (profile_idx + 1) % len(_HEADER_PROFILES)
-                profiles_tried += 1
-                wait = _clamp_wait(2)
-                if wait is None:
-                    print(f"  Aborting {label}: time budget exhausted before retry")
-                    return None
-                print(
-                    f"  HTTP {e.code} on {label} (content negotiation rejected), "
-                    f"retrying with header profile {profile_idx} in {wait:.0f}s..."
-                )
-                time.sleep(wait)
-                continue
             retry_after = e.headers.get("Retry-After") if e.headers else None
             try:
                 wait = float(retry_after) if retry_after else 0
@@ -484,6 +470,30 @@ def _clamp_wait(wait):
     if rem <= 0:
         return None
     return min(wait, rem)
+
+
+# Wall-clock reserved for the RSS fallback, on top of whatever the API spent.
+# The fallback exists for the case where the API burned the entire budget, so
+# it cannot share that budget — it needs its own.
+_FALLBACK_BUDGET = 90
+
+
+@contextlib.contextmanager
+def _reserve_budget(seconds):
+    """Grant a fresh deadline for a nested block, even if the budget is spent.
+
+    The opposite of :func:`_sub_budget`: this *extends*. Used only for the RSS
+    fallback, which runs precisely when the API has exhausted the budget — it
+    would otherwise abort before issuing a single request, which is exactly
+    what happened on run 149.
+    """
+    global _BUDGET_DEADLINE
+    previous = _BUDGET_DEADLINE
+    _BUDGET_DEADLINE = time.monotonic() + seconds
+    try:
+        yield
+    finally:
+        _BUDGET_DEADLINE = previous
 
 
 @contextlib.contextmanager
@@ -619,10 +629,31 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
     # budget exhausted). Signal that distinctly so the caller does NOT mail
     # an empty digest that looks like "nothing was published today".
     if not roots:
+        # The Atom API gave us nothing. Before failing the whole run, try the
+        # RSS feeds: on 2026-09-18 the /api/query origin 406'd every request
+        # for hours while rss.arxiv.org served the same announcements fine.
+        # RSS only covers the latest announcement batch, so this recovers
+        # today's papers rather than the full window - which still beats
+        # sending nothing, and cross-run dedup keeps the next run correct.
+        print("  API returned nothing — falling back to the RSS feeds...")
+        try:
+            from scq.arxiv.rss import fetch_rss_papers
+
+            with _reserve_budget(_FALLBACK_BUDGET):
+                rss_papers = fetch_rss_papers(categories, days_back=days_back)
+        except Exception as e:  # noqa: BLE001 — fallback must not mask the real error
+            print(f"  Warning: RSS fallback failed: {e}")
+            rss_papers = []
+        if rss_papers:
+            print(f"  RSS fallback recovered {len(rss_papers)} paper(s)")
+            for cat in categories:
+                n = sum(1 for p in rss_papers if cat in p.get("categories", []))
+                print(f"  {cat}: {n} papers (via RSS)")
+            return rss_papers
         raise ArxivFetchError(
-            "arXiv returned no usable response on any API host (combined "
-            "query and all per-category fallbacks failed - likely rate-limit, "
-            "blocked/rejected request, timeout, 5xx, or exhausted network budget)"
+            "arXiv returned nothing usable on any API host and the RSS "
+            "fallback was empty too (likely rate-limit, a rejecting origin, "
+            "timeout, 5xx, or an exhausted network budget)"
         )
 
     for root in roots:

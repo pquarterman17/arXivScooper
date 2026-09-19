@@ -163,15 +163,16 @@ jobs:
           nothing was emailed. Email is fine — do not go regenerate the Gmail
           App Password.
 
-          Possible causes:
-          - arXiv rejected the request (HTTP 406/403 — content negotiation or
-            a blocked client). Check the "Fetching from arXiv API" log lines.
-          - The runner egress IP is rate-limited (HTTP 429 storm)
-          - The 600s network budget was exhausted before any host answered
+          This now means BOTH sources failed: the Atom API (/api/query) and
+          the RSS feeds it falls back to. That is rare - through the
+          2026-09-18 API outage, RSS stayed up and carried the digest.
 
-          Both API hosts (arxiv.org, then export.arxiv.org) are tried before
-          this fires. Pin one with the SCQ_ARXIV_API_BASE env var if only one
-          is reachable.
+          What to do: usually nothing. The next scheduled run recovers the
+          missed papers via the overlapping lookback window.
+
+          To see which source is down, run the "arXiv API probe" workflow.
+          Do NOT change request headers or shrink max_results - both were
+          measured on 2026-09-18 and neither is ever the cause.
 
           Run: ${RUN_URL}
           EOF

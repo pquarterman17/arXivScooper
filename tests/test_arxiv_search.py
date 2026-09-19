@@ -492,14 +492,15 @@ def test_valid_empty_feed_returns_empty_list_without_raising():
     assert papers == []
 
 
-# ─── 406 regression: content negotiation + host failover ───────────
+# ─── 406 regression: transient throttling + host failover ──────────
 #
-# From 2026-09-13 onward every scheduled digest run died in ~17s with
-# "HTTP Error 406: Not Acceptable" on the combined query *and* on all four
-# per-category fallbacks. Two bugs combined: the client sent no ``Accept``
-# header (arXiv's edge answers such requests with 406), and 406 was not in
-# the retryable set, so the run collapsed instead of adapting. These tests
-# pin the fix.
+# From 2026-09-13 onward scheduled digest runs died in ~17s with "HTTP Error
+# 406: Not Acceptable" on the combined query *and* on all four per-category
+# fallbacks. Measured from a runner on 2026-09-18: the endpoint 406s every
+# request - urllib, raw http.client with curl's exact headers, any
+# User-Agent - for windows of several minutes, then serves 45/45 requests
+# fine from the same client. So a 406 here means "come back later", and the
+# only thing that beats it is waiting long enough. These tests pin that.
 
 
 def _http_error(code: str | int, headers=None):
@@ -545,23 +546,59 @@ def test_arxiv_get_retries_406_with_next_header_profile():
     assert seen_agents[0] != seen_agents[1], "header profile was not rotated after 406"
 
 
-def test_arxiv_get_gives_up_after_every_header_profile_is_406ed():
-    """A permanently-406 host must bail fast so the caller can fail over.
+def test_arxiv_get_outlasts_a_multi_minute_406_window():
+    """The whole point: keep waiting out a 406 window instead of bailing.
 
-    Burning all six retry attempts here is what turned one bad host into a
-    dead digest; we stop after the last untried profile.
+    Running out of header profiles must not end the retry loop - the first
+    shipped fix stopped after 2 attempts 2s apart and so died inside every
+    window it was supposed to survive.
     """
+    payload = _atom_response([{"id": "2401.00001"}])
     calls = []
 
     def fake_urlopen(req, timeout=None):
         calls.append(req.full_url)
-        raise _http_error(406)
+        # More consecutive 406s than there are header profiles.
+        if len(calls) <= len(arxiv_search._HEADER_PROFILES) + 3:
+            raise _http_error(406)
+        resp = MagicMock()
+        resp.read.return_value = payload
+        return resp
 
     with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
         result = arxiv_search._arxiv_get("http://example.test/atom", "test")
 
-    assert result is None
-    assert len(calls) == len(arxiv_search._HEADER_PROFILES)
+    assert result == payload
+    assert len(calls) > len(arxiv_search._HEADER_PROFILES)
+
+
+def test_arxiv_get_406_backs_off_exponentially(monkeypatch):
+    """A 406 must back off like a 429, not retry on a flat 2s timer."""
+    slept = []
+    monkeypatch.setattr(arxiv_search.time, "sleep", lambda s: slept.append(s))
+
+    def fake_urlopen(req, timeout=None):
+        raise _http_error(406)
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        arxiv_search._arxiv_get("http://example.test/atom", "test", max_retries=4)
+
+    assert len(slept) == 3
+    assert slept == sorted(slept), f"backoff must grow, got {slept}"
+    # Un-jittered the ladder is 5/10/20, but each wait carries up to 25%
+    # jitter, so the observed ratio ranges ~3.2-5.0. Assert against the
+    # low end; a tighter bound is flaky, not stricter.
+    assert slept[-1] >= 3 * slept[0], f"not exponential: {slept}"
+    assert sum(slept) > 30, f"too impatient to outlast a window: {slept}"
+
+
+def test_arxiv_get_406_ladder_spans_a_multi_minute_window():
+    """The shipped retry budget must cover the observed outage length."""
+    total = sum(
+        min(arxiv_search._MAX_BACKOFF, 5 * (2**i))
+        for i in range(arxiv_search._DEFAULT_MAX_RETRIES - 1)
+    )
+    assert total >= 300, f"retry ladder only spans {total}s"
 
 
 def test_arxiv_get_decompresses_gzip_response():
