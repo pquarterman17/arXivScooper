@@ -25,10 +25,20 @@ const INBOX_DIR = path.join(BASE_DIR, "inbox");
 
 // --- Helpers ---
 
+// arXiv's edge answers requests that send no `Accept` header with
+// "406 Not Acceptable" — Node's default client sends neither Accept nor
+// User-Agent, which is exactly the shape that got the digest blocked.
+// Identify ourselves and state what we accept on every request.
+const REQUEST_HEADERS = {
+  "User-Agent": "SCQFetch/1.0 (+https://github.com/pquarterman17/arXivScooper)",
+  Accept: "application/atom+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
-    client.get(url, { timeout: 30000 }, (res) => {
+    client.get(url, { timeout: 30000, headers: REQUEST_HEADERS }, (res) => {
       // Follow redirects
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return httpsGet(res.headers.location).then(resolve, reject);
