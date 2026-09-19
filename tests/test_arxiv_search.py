@@ -490,3 +490,184 @@ def test_valid_empty_feed_returns_empty_list_without_raising():
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=1)
 
     assert papers == []
+
+
+# ─── 406 regression: transient throttling + host failover ──────────
+#
+# From 2026-09-13 onward scheduled digest runs died in ~17s with "HTTP Error
+# 406: Not Acceptable" on the combined query *and* on all four per-category
+# fallbacks. Measured from a runner on 2026-09-18: the endpoint 406s every
+# request - urllib, raw http.client with curl's exact headers, any
+# User-Agent - for windows of several minutes, then serves 45/45 requests
+# fine from the same client. So a 406 here means "come back later", and the
+# only thing that beats it is waiting long enough. These tests pin that.
+
+
+def _http_error(code: str | int, headers=None):
+    return urllib.error.HTTPError("http://example.test/atom", int(code), "err", headers or {}, None)
+
+
+def test_arxiv_get_sends_accept_header():
+    """A request with no Accept header is what arXiv's edge 406s."""
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+        resp = MagicMock()
+        resp.read.return_value = _atom_response([])
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        arxiv_search._arxiv_get("http://example.test/atom", "test")
+
+    accept = captured["headers"].get("accept")
+    assert accept, f"No Accept header in request: {captured['headers']}"
+    assert "xml" in accept
+
+
+def test_arxiv_get_retries_406_with_next_header_profile():
+    """406 rotates to the next header profile instead of giving up."""
+    payload = _atom_response([{"id": "2401.00001"}])
+    seen_agents = []
+
+    def fake_urlopen(req, timeout=None):
+        seen_agents.append(req.get_header("User-agent"))
+        if len(seen_agents) == 1:
+            raise _http_error(406)
+        resp = MagicMock()
+        resp.read.return_value = payload
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        result = arxiv_search._arxiv_get("http://example.test/atom", "test")
+
+    assert result == payload
+    assert len(seen_agents) == 2
+    assert seen_agents[0] != seen_agents[1], "header profile was not rotated after 406"
+
+
+def test_arxiv_get_outlasts_a_multi_minute_406_window():
+    """The whole point: keep waiting out a 406 window instead of bailing.
+
+    Running out of header profiles must not end the retry loop - the first
+    shipped fix stopped after 2 attempts 2s apart and so died inside every
+    window it was supposed to survive.
+    """
+    payload = _atom_response([{"id": "2401.00001"}])
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        # More consecutive 406s than there are header profiles.
+        if len(calls) <= len(arxiv_search._HEADER_PROFILES) + 3:
+            raise _http_error(406)
+        resp = MagicMock()
+        resp.read.return_value = payload
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        result = arxiv_search._arxiv_get("http://example.test/atom", "test")
+
+    assert result == payload
+    assert len(calls) > len(arxiv_search._HEADER_PROFILES)
+
+
+def test_arxiv_get_406_backs_off_exponentially(monkeypatch):
+    """A 406 must back off like a 429, not retry on a flat 2s timer."""
+    slept = []
+    monkeypatch.setattr(arxiv_search.time, "sleep", lambda s: slept.append(s))
+
+    def fake_urlopen(req, timeout=None):
+        raise _http_error(406)
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        arxiv_search._arxiv_get("http://example.test/atom", "test", max_retries=4)
+
+    assert len(slept) == 3
+    assert slept == sorted(slept), f"backoff must grow, got {slept}"
+    # Un-jittered the ladder is 5/10/20, but each wait carries up to 25%
+    # jitter, so the observed ratio ranges ~3.2-5.0. Assert against the
+    # low end; a tighter bound is flaky, not stricter.
+    assert slept[-1] >= 3 * slept[0], f"not exponential: {slept}"
+    assert sum(slept) > 30, f"too impatient to outlast a window: {slept}"
+
+
+def test_arxiv_get_406_ladder_spans_a_multi_minute_window():
+    """The shipped retry budget must cover the observed outage length."""
+    total = sum(
+        min(arxiv_search._MAX_BACKOFF, 5 * (2**i))
+        for i in range(arxiv_search._DEFAULT_MAX_RETRIES - 1)
+    )
+    assert total >= 300, f"retry ladder only spans {total}s"
+
+
+def test_arxiv_get_decompresses_gzip_response():
+    """We advertise gzip, so we must be able to decode it."""
+    import gzip as _gzip
+
+    payload = _atom_response([{"id": "2401.00001"}])
+
+    def fake_urlopen(req, timeout=None):
+        resp = MagicMock()
+        resp.read.return_value = _gzip.compress(payload)
+        resp.headers = {"Content-Encoding": "gzip"}
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        result = arxiv_search._arxiv_get("http://example.test/atom", "test")
+
+    assert result == payload
+
+
+def test_api_bases_defaults_to_https_with_mirror():
+    """Plain http:// is part of what triggered the 406; never ship it."""
+    bases = arxiv_search._api_bases()
+    assert bases[0] == arxiv_search.ARXIV_API
+    assert all(b.startswith("https://") for b in bases)
+    assert len(bases) > 1, "no failover host configured"
+
+
+def test_api_bases_env_override(monkeypatch):
+    monkeypatch.setenv("SCQ_ARXIV_API_BASE", "https://a.test/q, https://b.test/q")
+    assert arxiv_search._api_bases() == ["https://a.test/q", "https://b.test/q"]
+
+
+def test_arxiv_get_any_fails_over_to_mirror(monkeypatch):
+    """A host that is blocked for this egress IP must not sink the digest."""
+    monkeypatch.setenv("SCQ_ARXIV_API_BASE", "https://blocked.test/q,https://ok.test/q")
+    payload = _atom_response([{"id": "2401.00001"}])
+    seen = []
+
+    def fake_urlopen(req, timeout=None):
+        seen.append(req.full_url)
+        if "blocked.test" in req.full_url:
+            raise _http_error(406)
+        resp = MagicMock()
+        resp.read.return_value = payload
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        result = arxiv_search._arxiv_get_any({"search_query": "cat:quant-ph"}, "combined query")
+
+    assert result == payload
+    assert any("blocked.test" in u for u in seen)
+    assert any("ok.test" in u for u in seen)
+
+
+def test_fetch_arxiv_papers_survives_first_host_406(monkeypatch):
+    """End-to-end: the exact production failure now recovers via the mirror."""
+    monkeypatch.setenv("SCQ_ARXIV_API_BASE", "https://blocked.test/q,https://ok.test/q")
+    recent = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = _atom_response([{"id": "2401.00001", "published": recent}])
+
+    def fake_urlopen(req, timeout=None):
+        if "blocked.test" in req.full_url:
+            raise _http_error(406)
+        resp = MagicMock()
+        resp.read.return_value = payload
+        return resp
+
+    with patch.object(arxiv_search.urllib.request, "urlopen", fake_urlopen):
+        papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=3, max_results=10)
+
+    assert [p["id"] for p in papers] == ["2401.00001"]

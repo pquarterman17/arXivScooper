@@ -224,8 +224,33 @@ local proxy in `scq/server.py` that avoids CORS and sets a proper User-Agent hea
 - **scq/server.py** exposes `/api/arxiv?<query>` which forwards to `https://arxiv.org/api/query?<query>`
 - Both `paper_scraper.html` and `paper_database.html` auto-detect localhost and route
   through the proxy. Falls back to CORS proxies (allorigins, corsproxy.io) then direct fetch.
-- `export.arxiv.org` is **unreachable** from the user's network (Fastly CDN routing issue).
-  All code uses `arxiv.org` instead. Do NOT switch back to `export.arxiv.org`.
+- `export.arxiv.org` is **unreachable** from the user's network (Fastly CDN routing issue),
+  so `arxiv.org` stays the *primary* host everywhere. The digest fetcher
+  (`scq/arxiv/search.py`) additionally keeps `export.arxiv.org` as a **failover**
+  host tried only after `arxiv.org` exhausts its retries — that is what keeps the
+  GitHub Actions digest alive when the runner's egress IP is blocked or throttled
+  on `arxiv.org`. Do NOT make `export.arxiv.org` the primary. Pin a single host
+  with `SCQ_ARXIV_API_BASE` (comma-separated for an explicit ordered list).
+- **HTTP 406 from `/api/query` is arXiv's origin failing, not our request.**
+  Diagnosed 2026-09-18 over six probe rounds from a CI runner. What the evidence
+  actually shows: headers are irrelevant (raw `http.client` sending curl's exact
+  three headers 406s while the curl binary gets 200 at the same moment), and so
+  is request size — `max_results=25` returned a byte-identical 49982 on every
+  pass while `max_results=1`, a strictly *smaller* request, 406'd. That pattern
+  is a **Fastly cache hit in front of a rejecting origin**: popular URLs are
+  served from cache, everything else reaches the broken origin. The digest's
+  combined OR-query is unique to this project, so it never gets a cache hit and
+  fails every single run — while ad-hoc spot checks look fine. Do NOT "fix" a
+  406 by changing `_HEADER_PROFILES` or shrinking `max_results`; both were
+  measured and neither is the cause.
+- **The digest falls back to `rss.arxiv.org`** (`scq/arxiv/rss.py`) when the API
+  yields nothing — those feeds stayed up throughout the outage. RSS carries only
+  the latest announcement batch (~1 day), so a fallback run recovers today's
+  papers rather than the full lookback window; cross-run dedup keeps the next
+  run correct. `_THROTTLE_STATUSES` (403/406/415/429) also get exponential
+  backoff first, so a genuinely brief rejection is simply waited out.
+- Run `python tools/arxiv_probe.py` (or the **arXiv API probe** workflow) to see
+  which sources are up right now before chasing a regression.
 - If 429 rate-limit errors occur, wait a few minutes between searches.
 
 ## CI Pipeline
@@ -238,7 +263,13 @@ The GitHub Actions CI gate runs in three sequential stages:
 
 The **digest workflow** (`.github/workflows/digest.yml`) adds:
 - **Fail-fast secrets check** — validates `SCQ_EMAIL_FROM`, `SCQ_EMAIL_APP_PASSWORD`, `SCQ_EMAIL_TO` are non-empty before running
-- **`--require-email` flag** on the digest script — exits 2 if email fails (CI-safe)
+- **Empty runs still email.** A run that finds nothing sends a short
+  "no new papers" note listing what was checked, so an empty inbox always means
+  the pipeline broke rather than "arXiv was quiet". Controlled by
+  `digest.sendWhenEmpty` (default `true`) or `--no-empty-email`.
+- **`--require-email` flag** on the digest script — exits 2 if email fails (CI-safe).
+  An arXiv fetch failure exits **3** instead, so the failure handler can say
+  "arXiv fetch failed" rather than blaming Gmail.
 - **GitHub Actions job summary** — writes paper counts + email status to the run summary page
 - **Self-healing on failure** — auto-opens a GitHub Issue labelled `digest-failure` with diagnosis + fix instructions
 
