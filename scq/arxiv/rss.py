@@ -9,9 +9,13 @@ when the API gives nothing.
 
 Trade-off, on purpose: an RSS feed is the *latest announcement batch* for a
 category (roughly one publishing day), not an arbitrary date range. So this
-cannot honor a wide ``days_back``; it recovers today's papers rather than the
-whole window. For a digest that runs daily on top of cross-run dedup that is
-the right shape, and it beats sending nothing.
+cannot honor a wide ``days_back``; it recovers the newest papers rather than
+the whole window. For a digest that runs daily on top of cross-run dedup that
+is the right shape, and it beats sending nothing.
+
+The same asymmetry applies downward: a *narrow* ``days_back`` must not be able
+to discard the batch either, so the lookback is floored at
+``_MIN_LOOKBACK_DAYS``.
 
 Shape-compatible with :func:`scq.arxiv.search.fetch_arxiv_papers` — same paper
 dicts, so ranking, filtering, rendering and email are unchanged.
@@ -23,6 +27,20 @@ import re
 from datetime import datetime, timedelta, timezone
 
 RSS_BASE = "https://rss.arxiv.org/rss"
+
+# Floor on the lookback applied to RSS entries, in days.
+#
+# An RSS feed only ever carries arXiv's most recent announcement batch, so
+# filtering it by a narrow caller window can empty it entirely for reasons
+# that have nothing to do with relevance. Saturday 2026-09-19 is the worked
+# example: arXiv last announced Friday 04:00 UTC, and a `--days 1` run at
+# 15:46 UTC discarded the whole batch as "too old", failing the digest while
+# holding perfectly good papers.
+#
+# 7 days spans a weekend or a holiday gap, and is still tight enough to reject
+# a genuinely stale cached feed. Cross-run dedup, not this window, is what
+# stops papers being emailed twice.
+_MIN_LOOKBACK_DAYS = 7
 
 # Feed summaries are prefixed with announce metadata, e.g.
 # "arXiv:2609.19147v1 Announce Type: new \nAbstract: We present ..."
@@ -80,7 +98,9 @@ def fetch_rss_papers(categories, days_back=1, fetcher=None):
     from scq.arxiv.search import _arxiv_get, _make_short_authors
 
     get = fetcher or _arxiv_get
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
+    # Never let a narrow caller window discard the only batch the feed has.
+    effective_days = max(days_back, _MIN_LOOKBACK_DAYS)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=effective_days)
 
     papers = []
     seen = set()

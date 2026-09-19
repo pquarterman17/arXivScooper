@@ -164,3 +164,32 @@ def test_reserve_budget_restores_the_outer_deadline():
         assert arxiv_search._budget_remaining() > 30
     assert arxiv_search._budget_remaining() <= spent
     arxiv_search.set_budget(None)
+
+
+def test_a_narrow_window_cannot_discard_the_batch():
+    """Regression for digest run 152 (Saturday 2026-09-19).
+
+    arXiv last announced Friday 04:00 UTC. A `--days 1` run at 15:46 UTC
+    Saturday filtered the entire batch out as "too old", so the fallback
+    returned nothing and the digest failed while holding good papers. The feed
+    only ever has the latest batch, so a narrow caller window must not empty
+    it.
+    """
+    thirty_six_hours_ago = datetime.now(timezone.utc) - timedelta(hours=36)
+    stamp = thirty_six_hours_ago.strftime("%a, %d %b %Y %H:%M:%S +0000")
+    feed = _rss([("2609.19147", "Announced before the weekend", "A", "quant-ph", stamp)])
+
+    papers = rss_mod.fetch_rss_papers(["quant-ph"], days_back=1, fetcher=lambda *_a, **_kw: feed)
+    assert [p["id"] for p in papers] == ["2609.19147"]
+
+
+def test_genuinely_stale_entries_are_still_dropped():
+    """The floor is a floor, not "keep everything" — a stale feed still fails."""
+    long_ago = (datetime.now(timezone.utc) - timedelta(days=45)).strftime(
+        "%a, %d %b %Y %H:%M:%S +0000"
+    )
+    feed = _rss([("2501.00001", "Ancient", "A", "quant-ph", long_ago)])
+
+    assert (
+        rss_mod.fetch_rss_papers(["quant-ph"], days_back=1, fetcher=lambda *_a, **_kw: feed) == []
+    )
