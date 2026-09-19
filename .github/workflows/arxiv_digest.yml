@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Cross-run dedup state (sent arXiv IDs). The unique run_id primary key
       # never hits, so the post-job step always saves a fresh cache; the
@@ -43,7 +43,7 @@ jobs:
       # concerns. If the cache is evicted (7-day idle) the worst case is one
       # digest with repeats — never missed papers.
       - name: Restore digest dedup state
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: data/digest_state.json
           key: digest-state-${{ github.run_id }}
@@ -70,7 +70,7 @@ jobs:
           echo "All required secrets are present."
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -114,7 +114,7 @@ jobs:
       # Locally-generated digests go to `paths().digests_dir`, which the
       # user's `data/user_config/paths.toml` can point at OneDrive.
       - name: Upload digest as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digest-${{ github.run_id }}
           path: digests/
