@@ -67,6 +67,10 @@
       },
       "description": "Recipients of the digest. Each entry has at least an email; optional name, frequency, enabled. Production CI also honors the SCQ_EMAIL_TO env var as a fallback when no recipients are configured here."
     },
+    "sendWhenEmpty": {
+      "type": "boolean",
+      "description": "Send a short 'no new papers' email when a run finds nothing to report. Keeps silence meaningful: with this on, no email in your inbox always means the pipeline broke, never that arXiv was quiet. Set false to hear from the digest only when there are papers."
+    },
     "subjectPrefix": {
       "type": "string",
       "maxLength": 40
