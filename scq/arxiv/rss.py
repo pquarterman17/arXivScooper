@@ -95,9 +95,10 @@ def fetch_rss_papers(categories, days_back=1, fetcher=None):
     """
     import feedparser
 
-    from scq.arxiv.search import _arxiv_get, _make_short_authors
+    from scq.arxiv.search import ArxivFetchError, _arxiv_get, _make_short_authors
 
     get = fetcher or _arxiv_get
+    reachable = 0
     # Never let a narrow caller window discard the only batch the feed has.
     effective_days = max(days_back, _MIN_LOOKBACK_DAYS)
     cutoff = datetime.now(timezone.utc) - timedelta(days=effective_days)
@@ -113,6 +114,17 @@ def fetch_rss_papers(categories, days_back=1, fetcher=None):
         except Exception as e:  # noqa: BLE001 — a bad feed must not sink the rest
             print(f"  Warning: could not parse RSS for {cat}: {e}")
             continue
+        # "Parsed" is too weak a bar on its own: feedparser does not raise on
+        # arbitrary bytes, it just returns a feed with no version and no
+        # entries. Require a recognised feed format before counting this as a
+        # real answer, so garbage stays a fetch failure while a valid but
+        # item-less feed (arXiv announces Sunday-Friday) counts as a quiet day.
+        n_items = len(getattr(feed, "entries", []) or [])
+        if not getattr(feed, "version", "") and not n_items:
+            print(f"  Warning: RSS for {cat} was not a recognisable feed")
+            continue
+        reachable += 1
+        print(f"  RSS {cat}: {n_items} item(s)")
 
         for entry in getattr(feed, "entries", []):
             arxiv_id = _entry_id(entry)
@@ -144,5 +156,10 @@ def fetch_rss_papers(categories, days_back=1, fetcher=None):
                     "abs_url": f"https://arxiv.org/abs/{arxiv_id}",
                 }
             )
+
+    if not reachable:
+        # Nothing answered. That is a fetch failure and must not be confused
+        # with arXiv having announced nothing.
+        raise ArxivFetchError(f"no RSS feed could be fetched ({len(categories)} tried)")
 
     return papers
