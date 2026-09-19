@@ -1,0 +1,24 @@
+name: arXiv API probe (diagnostic)
+
+# Manual troubleshooting aid: reports whether arXiv's API is rejecting us
+# right now. The digest 406s in windows of several minutes (see
+# tools/arxiv_probe.py); run this to tell an open window apart from a real
+# regression. Never emails anything.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install .
+      - name: Probe arXiv from the runner
+        run: python -u tools/arxiv_probe.py

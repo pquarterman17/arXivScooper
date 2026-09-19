@@ -30,8 +30,8 @@ import { initConfig, getConfig } from './config.js';
  *
  * Exported for tests; production callers should use bootstrapSearchConfig().
  *
- * @param {object} target  - usually globalThis.SCRAPER_CONFIG
- * @param {object} merged  - value from getConfig('search-sources')
+ * @param {Record<string, any>} target  - usually globalThis.SCRAPER_CONFIG
+ * @param {Record<string, any>} merged  - value from getConfig('search-sources')
  */
 export function applySearchConfig(target, merged) {
   if (!target || !merged) return;

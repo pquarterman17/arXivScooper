@@ -21,6 +21,9 @@ unit testing with a mocked HTTP layer.
 
 from __future__ import annotations
 
+import contextlib
+import gzip
+import os
 import random
 import re
 import time
@@ -171,8 +174,41 @@ _FALLBACK_KEYWORDS = {
 # import it directly). Points at the same object as _FALLBACK_KEYWORDS.
 KEYWORD_WEIGHTS = _FALLBACK_KEYWORDS
 
-ARXIV_API = "http://arxiv.org/api/query"
+# Primary API host. HTTPS is mandatory: the old ``http://`` URL was answered
+# with a redirect by arXiv's edge and, since ~2026-09, a bare HTTP+no-Accept
+# request is rejected outright with "406 Not Acceptable" (see _HEADER_PROFILES).
+ARXIV_API = "https://arxiv.org/api/query"
+# Failover hosts, tried in order after ARXIV_API exhausts its retries.
+# ``arxiv.org`` stays first because ``export.arxiv.org`` is unroutable from
+# the maintainer's home network (Fastly CDN issue, see CLAUDE.md); on GitHub
+# Actions the reverse is true, so keeping both means whichever host is
+# reachable from the current network wins without any per-machine config.
+ARXIV_API_MIRRORS = ("https://export.arxiv.org/api/query",)
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+
+# Request header profiles, tried in order. arXiv sits behind an edge/WAF that
+# returns 406 (not 403/429) when a client sends no ``Accept`` header at all —
+# which is exactly what bare ``urllib.request`` does. Profile 0 is the polite,
+# spec-correct client arXiv's API terms ask for; profile 1 is a wider-Accept
+# retry for edges that also dislike the unfamiliar product token. Neither
+# impersonates a browser; both identify the project and link the repo.
+_HEADER_PROFILES = (
+    {
+        "User-Agent": "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)",
+        "Accept": "application/atom+xml,application/xml;q=0.9,text/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate",
+    },
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (compatible; SCQDigest/1.0; "
+            "+https://github.com/pquarterman17/arXivScooper)"
+        ),
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "identity",
+    },
+)
 
 # Wall-clock budget (set by `set_budget(seconds)`). When the deadline passes,
 # network calls return None instead of starting another attempt — keeps the
@@ -190,7 +226,13 @@ _ARXIV_MAX_PER_REQUEST = 2000
 # and wasted the 600s wall-clock budget; 6 attempts with the larger backoff
 # cap lets a single request outlast a throttle window while the budget guard
 # still prevents the runner from overrunning its timeout.
-_DEFAULT_MAX_RETRIES = 6
+# 8 attempts on the 5*2^n ladder (capped at _MAX_BACKOFF) spans roughly
+# 8 minutes of backoff, which covers the multi-minute 406 windows measured on
+# 2026-09-18. The wall-clock budget still bounds the total.
+_DEFAULT_MAX_RETRIES = 8
+# Floor on the budget slice handed to a single API host, so slicing never
+# starves a host below one connect+read round trip.
+_MIN_HOST_BUDGET = 30
 
 # ─── Relevance config cache ───
 
@@ -314,16 +356,55 @@ def _budget_exceeded():
     return rem is not None and rem <= 0
 
 
+# HTTP statuses that mean "this host/client combination was rejected" rather
+# than "try again later". They are retryable, but only after swapping to the
+# next header profile — waiting longer with identical headers never helps.
+# Statuses arXiv's edge returns when it is shedding load rather than
+# answering. Measured 2026-09-18 from a GitHub Actions runner: the endpoint
+# 406s *every* request - urllib, raw http.client with curl's exact headers,
+# any User-Agent - for windows of several minutes, then serves 45/45 requests
+# fine from the same client minutes later. So a 406 here is a "come back
+# later", exactly like a 429, and the only thing that beats it is waiting.
+_THROTTLE_STATUSES = frozenset({403, 406, 415, 429})
+
+
+def _read_body(resp):
+    """Return the response body, transparently gunzipping when needed.
+
+    We advertise ``Accept-Encoding: gzip`` in the primary header profile, so
+    we have to be able to decode it.
+    """
+    body = resp.read()
+    encoding = ""
+    try:
+        raw = resp.headers.get("Content-Encoding")
+        if isinstance(raw, str):
+            encoding = raw.lower()
+    except Exception:  # noqa: BLE001 — header access must never sink a fetch
+        encoding = ""
+    if "gzip" in encoding:
+        try:
+            return gzip.decompress(body)
+        except (OSError, EOFError) as e:
+            print(f"  Warning: could not gunzip response ({e}), using raw bytes")
+    return body
+
+
 def _arxiv_get(url, label, max_retries=_DEFAULT_MAX_RETRIES):
     """Fetch a URL from arXiv with polite retries.
 
-    Retries on HTTP 429, 5xx, socket timeouts, and transient URL errors. Honors
-    the server's Retry-After header when present; otherwise uses exponential
-    backoff with jitter, capped at _MAX_BACKOFF.
+    Retries on the throttle statuses (403/406/415/429), 5xx, socket timeouts,
+    and transient URL errors. Honors the server's Retry-After header when
+    present; otherwise uses exponential backoff with jitter, capped at
+    _MAX_BACKOFF, so a single request can outlast a multi-minute rejection
+    window. The header profile is rotated on each throttled retry as a free
+    second chance, but rotating is *not* the strategy — waiting is, and
+    running out of profiles never ends the retry loop.
 
     Aborts (returns None) if the wall-clock budget set in main() is exhausted —
     so a slow/hung arXiv can't run the GH Actions job clock out.
     """
+    profile_idx = 0
     for attempt in range(max_retries):
         if _budget_exceeded():
             print(f"  Aborting {label}: time budget exhausted")
@@ -331,17 +412,17 @@ def _arxiv_get(url, label, max_retries=_DEFAULT_MAX_RETRIES):
         try:
             req = urllib.request.Request(
                 url,
-                headers={
-                    "User-Agent": "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
-                },
+                headers=dict(_HEADER_PROFILES[profile_idx]),
             )
             resp = urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT)
-            return resp.read()
+            return _read_body(resp)
         except urllib.error.HTTPError as e:
-            retryable = e.code == 429 or 500 <= e.code < 600
+            retryable = e.code in _THROTTLE_STATUSES or 500 <= e.code < 600
             if not retryable or attempt == max_retries - 1:
                 print(f"  Warning: Failed to fetch {label}: {e}")
                 return None
+            if e.code in _THROTTLE_STATUSES:
+                profile_idx = (profile_idx + 1) % len(_HEADER_PROFILES)
             retry_after = e.headers.get("Retry-After") if e.headers else None
             try:
                 wait = float(retry_after) if retry_after else 0
@@ -391,6 +472,95 @@ def _clamp_wait(wait):
     return min(wait, rem)
 
 
+# Wall-clock reserved for the RSS fallback, on top of whatever the API spent.
+# The fallback exists for the case where the API burned the entire budget, so
+# it cannot share that budget — it needs its own.
+_FALLBACK_BUDGET = 90
+
+
+@contextlib.contextmanager
+def _reserve_budget(seconds):
+    """Grant a fresh deadline for a nested block, even if the budget is spent.
+
+    The opposite of :func:`_sub_budget`: this *extends*. Used only for the RSS
+    fallback, which runs precisely when the API has exhausted the budget — it
+    would otherwise abort before issuing a single request, which is exactly
+    what happened on run 149.
+    """
+    global _BUDGET_DEADLINE
+    previous = _BUDGET_DEADLINE
+    _BUDGET_DEADLINE = time.monotonic() + seconds
+    try:
+        yield
+    finally:
+        _BUDGET_DEADLINE = previous
+
+
+@contextlib.contextmanager
+def _sub_budget(seconds):
+    """Temporarily tighten the wall-clock deadline for a nested block.
+
+    Only ever *shortens* the active budget — an outer deadline set by
+    ``set_budget`` still wins. Used to give each API host a bounded slice of
+    the run's network budget so the first host cannot spend it all and leave
+    the failover host no room to try.
+    """
+    global _BUDGET_DEADLINE
+    previous = _BUDGET_DEADLINE
+    proposed = time.monotonic() + seconds
+    _BUDGET_DEADLINE = proposed if previous is None else min(previous, proposed)
+    try:
+        yield
+    finally:
+        _BUDGET_DEADLINE = previous
+
+
+def _api_bases():
+    """Return the arXiv API endpoints to try, in order.
+
+    ``SCQ_ARXIV_API_BASE`` pins a single endpoint (comma-separated for an
+    explicit ordered list) — useful on a network where one of the hosts is
+    unroutable, and for tests.
+    """
+    override = os.environ.get("SCQ_ARXIV_API_BASE", "").strip()
+    if override:
+        return [b.strip() for b in override.split(",") if b.strip()]
+    return [ARXIV_API, *ARXIV_API_MIRRORS]
+
+
+def _arxiv_get_any(params, label, max_retries=_DEFAULT_MAX_RETRIES):
+    """Run one query against each API host until one answers.
+
+    ``_arxiv_get`` already exhausts retries and header profiles per host; this
+    adds the outer host failover, so a host that is blocked, blackholed or
+    rate-limited for this runner's egress IP does not sink the whole digest.
+    """
+    query = urllib.parse.urlencode(params)
+    bases = _api_bases()
+    for i, base in enumerate(bases):
+        if _budget_exceeded():
+            print(f"  Aborting {label}: time budget exhausted")
+            return None
+        host_label = (
+            label if len(bases) == 1 else f"{label} via {urllib.parse.urlparse(base).netloc}"
+        )
+        # Cap what this host may spend so a 429 storm on the first host still
+        # leaves the failover host a chance to answer.
+        remaining = _budget_remaining()
+        hosts_left = len(bases) - i
+        if remaining is not None and hosts_left > 1:
+            ctx = _sub_budget(max(_MIN_HOST_BUDGET, remaining / hosts_left))
+        else:
+            ctx = contextlib.nullcontext()
+        with ctx:
+            data = _arxiv_get(f"{base}?{query}", host_label, max_retries=max_retries)
+        if data is not None:
+            return data
+        if i + 1 < len(bases):
+            print(f"  Failing over to {urllib.parse.urlparse(bases[i + 1]).netloc}...")
+    return None
+
+
 def fetch_arxiv_papers(categories, days_back=1, max_results=200):
     """Fetch recent papers from arXiv API for the given categories.
 
@@ -415,8 +585,7 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
         "sortOrder": "descending",
         "max_results": str(combined_max),
     }
-    url = ARXIV_API + "?" + urllib.parse.urlencode(params)
-    xml_data = _arxiv_get(url, "combined query")
+    xml_data = _arxiv_get_any(params, "combined query")
 
     roots = []
     if xml_data is not None:
@@ -447,8 +616,7 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
                 "sortOrder": "descending",
                 "max_results": str(min(max_results, _ARXIV_MAX_PER_REQUEST)),
             }
-            cat_url = ARXIV_API + "?" + urllib.parse.urlencode(params)
-            cat_xml = _arxiv_get(cat_url, cat)
+            cat_xml = _arxiv_get_any(params, cat)
             if cat_xml is None:
                 continue
             try:
@@ -461,10 +629,31 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
     # budget exhausted). Signal that distinctly so the caller does NOT mail
     # an empty digest that looks like "nothing was published today".
     if not roots:
+        # The Atom API gave us nothing. Before failing the whole run, try the
+        # RSS feeds: on 2026-09-18 the /api/query origin 406'd every request
+        # for hours while rss.arxiv.org served the same announcements fine.
+        # RSS only covers the latest announcement batch, so this recovers
+        # today's papers rather than the full window - which still beats
+        # sending nothing, and cross-run dedup keeps the next run correct.
+        print("  API returned nothing — falling back to the RSS feeds...")
+        try:
+            from scq.arxiv.rss import fetch_rss_papers
+
+            with _reserve_budget(_FALLBACK_BUDGET):
+                rss_papers = fetch_rss_papers(categories, days_back=days_back)
+        except Exception as e:  # noqa: BLE001 — fallback must not mask the real error
+            print(f"  Warning: RSS fallback failed: {e}")
+            rss_papers = []
+        if rss_papers:
+            print(f"  RSS fallback recovered {len(rss_papers)} paper(s)")
+            for cat in categories:
+                n = sum(1 for p in rss_papers if cat in p.get("categories", []))
+                print(f"  {cat}: {n} papers (via RSS)")
+            return rss_papers
         raise ArxivFetchError(
-            "arXiv returned no usable response (combined query and all "
-            "per-category fallbacks failed - likely rate-limit, timeout, "
-            "5xx, or exhausted network budget)"
+            "arXiv returned nothing usable on any API host and the RSS "
+            "fallback was empty too (likely rate-limit, a rejecting origin, "
+            "timeout, 5xx, or an exhausted network budget)"
         )
 
     for root in roots:
