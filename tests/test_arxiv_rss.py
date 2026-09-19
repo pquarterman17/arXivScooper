@@ -164,3 +164,73 @@ def test_reserve_budget_restores_the_outer_deadline():
         assert arxiv_search._budget_remaining() > 30
     assert arxiv_search._budget_remaining() <= spent
     arxiv_search.set_budget(None)
+
+
+def test_a_narrow_window_cannot_discard_the_batch():
+    """Regression for digest run 152 (Saturday 2026-09-19).
+
+    arXiv last announced Friday 04:00 UTC. A `--days 1` run at 15:46 UTC
+    Saturday filtered the entire batch out as "too old", so the fallback
+    returned nothing and the digest failed while holding good papers. The feed
+    only ever has the latest batch, so a narrow caller window must not empty
+    it.
+    """
+    thirty_six_hours_ago = datetime.now(timezone.utc) - timedelta(hours=36)
+    stamp = thirty_six_hours_ago.strftime("%a, %d %b %Y %H:%M:%S +0000")
+    feed = _rss([("2609.19147", "Announced before the weekend", "A", "quant-ph", stamp)])
+
+    papers = rss_mod.fetch_rss_papers(["quant-ph"], days_back=1, fetcher=lambda *_a, **_kw: feed)
+    assert [p["id"] for p in papers] == ["2609.19147"]
+
+
+def test_genuinely_stale_entries_are_still_dropped():
+    """The floor is a floor, not "keep everything" — a stale feed still fails."""
+    long_ago = (datetime.now(timezone.utc) - timedelta(days=45)).strftime(
+        "%a, %d %b %Y %H:%M:%S +0000"
+    )
+    feed = _rss([("2501.00001", "Ancient", "A", "quant-ph", long_ago)])
+
+    assert (
+        rss_mod.fetch_rss_papers(["quant-ph"], days_back=1, fetcher=lambda *_a, **_kw: feed) == []
+    )
+
+
+# ─── quiet day vs. blind: the weekend case ─────────────────────────
+#
+# Saturday 2026-09-19: the Atom API was 406ing and the RSS feeds answered
+# HTTP 200 with ~900 bytes — a valid feed carrying no items, because arXiv
+# announces Sunday-Friday. The digest reported "the RSS fallback was empty
+# too" and exited 3, filing a failure issue for a day that simply had no
+# papers. An item-less feed is data; only an unreachable one is a failure.
+
+
+def test_reachable_but_item_less_feeds_are_a_quiet_day_not_a_failure():
+    empty_feed = _rss([])
+
+    def fake_get(url, label, **_kw):
+        # API is tried first and is down; the feeds answer with no items.
+        return empty_feed if "rss.arxiv.org" in url else None
+
+    with patch.object(arxiv_search, "_arxiv_get", fake_get):
+        papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=7, max_results=10)
+
+    assert papers == []
+
+
+def test_fetch_rss_papers_raises_when_no_feed_is_reachable():
+    with pytest.raises(arxiv_search.ArxivFetchError):
+        rss_mod.fetch_rss_papers(["quant-ph", "cond-mat.supr-con"], fetcher=lambda *_a, **_kw: None)
+
+
+def test_fetch_rss_papers_returns_empty_when_reachable_but_item_less():
+    """The complement: reachable + no items must NOT raise."""
+    assert rss_mod.fetch_rss_papers(["quant-ph"], fetcher=lambda *_a, **_kw: _rss([])) == []
+
+
+def test_one_reachable_feed_is_enough_to_count_as_reachable():
+    """A partial outage is still a real answer, not a blind run."""
+
+    def fake_get(url, label, **_kw):
+        return None if "quant-ph" in url else _rss([])
+
+    assert rss_mod.fetch_rss_papers(["quant-ph", "cond-mat.supr-con"], fetcher=fake_get) == []
