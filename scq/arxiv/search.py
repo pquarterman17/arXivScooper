@@ -636,20 +636,33 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
         # today's papers rather than the full window - which still beats
         # sending nothing, and cross-run dedup keeps the next run correct.
         print("  API returned nothing — falling back to the RSS feeds...")
+        # `None` = RSS could not be reached at all; `[]` = RSS answered and
+        # arXiv had announced nothing. Those must not collapse together: the
+        # first is a failure, the second is a fact about the day.
+        rss_papers = None
         try:
             from scq.arxiv.rss import fetch_rss_papers
 
             with _reserve_budget(_FALLBACK_BUDGET):
                 rss_papers = fetch_rss_papers(categories, days_back=days_back)
+        except ArxivFetchError as e:
+            print(f"  RSS fallback unreachable: {e}")
         except Exception as e:  # noqa: BLE001 — fallback must not mask the real error
             print(f"  Warning: RSS fallback failed: {e}")
-            rss_papers = []
+
         if rss_papers:
             print(f"  RSS fallback recovered {len(rss_papers)} paper(s)")
             for cat in categories:
                 n = sum(1 for p in rss_papers if cat in p.get("categories", []))
                 print(f"  {cat}: {n} papers (via RSS)")
             return rss_papers
+        if rss_papers is not None:
+            # Feeds served a valid, item-less response — arXiv announces
+            # Sunday-Friday, so weekends are legitimately empty. Reporting a
+            # fetch failure here would be wrong, and would suppress the
+            # "no new papers" note that exists precisely for this.
+            print("  RSS reachable but arXiv announced nothing — a genuinely quiet day.")
+            return []
         raise ArxivFetchError(
             "arXiv returned nothing usable on any API host and the RSS "
             "fallback was empty too (likely rate-limit, a rejecting origin, "
