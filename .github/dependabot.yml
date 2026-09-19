@@ -28,3 +28,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Above Dependabot's default of 5. With five action PRs sitting open it
+    # stops proposing any more in this ecosystem — silently. That is why
+    # arxiv_digest.yml kept checkout@v4 / cache@v4 / setup-python@v5 for
+    # months while the other workflows got bumped: the cap was reached
+    # before Dependabot ever looked at that file.
+    open-pull-requests-limit: 10
