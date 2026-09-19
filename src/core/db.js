@@ -37,6 +37,19 @@ let _lastSavedAt = null;
 let _cacheTimer = null;
 
 /**
+ * Minimal localStorage-shaped interface the offline cache needs.
+ *
+ * Typed structurally rather than as the DOM `Storage` interface so a test can
+ * pass a two-method stub. TypeScript 7 rejects property access on a bare
+ * `object`, so the annotation has to name the shape.
+ *
+ * @typedef {{
+ *   getItem: (key: string) => (string | null),
+ *   setItem: (key: string, value: string) => void,
+ * }} StorageLike
+ */
+
+/**
  * Initialize sql.js and load the database.
  *
  * @param {object} [opts]
@@ -44,7 +57,7 @@ let _cacheTimer = null;
  * @param {string}   [opts.dbPath]    - relative path to the .db file. Defaults to 'data/arxiv_scooper.db'.
  * @param {string}   [opts.wasmBaseUrl] - where sql.js can fetch the .wasm. Defaults to a CDN.
  * @param {function} [opts.fetch]     - fetch impl, defaults to globalThis.fetch.
- * @param {object}   [opts.storage]   - localStorage-shaped object for cache; default is globalThis.localStorage.
+ * @param {StorageLike} [opts.storage] - localStorage-shaped object for cache; default is globalThis.localStorage.
  * @returns {Promise<object>} the underlying sql.js Database
  */
 export async function init(opts = {}) {
