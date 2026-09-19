@@ -50,7 +50,10 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          # Must match .nvmrc. CI ran Node 20 while the project targeted 22,
+          # so CI was not testing what contributors run — and dependencies
+          # that require >=22 (jsdom 30) failed here while passing locally.
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
