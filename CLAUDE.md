@@ -249,8 +249,16 @@ local proxy in `scq/server.py` that avoids CORS and sets a proper User-Agent hea
   papers rather than the full lookback window; cross-run dedup keeps the next
   run correct. `_THROTTLE_STATUSES` (403/406/415/429) also get exponential
   backoff first, so a genuinely brief rejection is simply waited out.
+- **arXiv announces Sunday–Friday**, so on a Saturday the RSS feeds serve a
+  valid but item-less document (~900 bytes, vs ~330 KB on an announcement day).
+  That is a quiet day, not an outage: `fetch_rss_papers` counts a feed as
+  reachable only when feedparser recognises the format, and an item-less
+  reachable feed returns `[]` so the digest sends its "no new papers" note
+  instead of exiting 3. Unparseable bytes still raise `ArxivFetchError` — zero
+  usable information is a failure, not a quiet day.
 - Run `python tools/arxiv_probe.py` (or the **arXiv API probe** workflow) to see
-  which sources are up right now before chasing a regression.
+  which sources are up right now before chasing a regression. Byte counts
+  matter: a 200 of ~900 bytes on an RSS feed means "no items", not "healthy".
 - If 429 rate-limit errors occur, wait a few minutes between searches.
 
 ## CI Pipeline
