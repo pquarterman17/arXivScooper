@@ -367,6 +367,23 @@ def test_effective_config_surfaces_cpc_and_assignee_boosts():
     assert eff["assigneeBoosts"] == {"Google": 5.0}
 
 
+
+def test_score_patent_honours_profile_requires_gate():
+    from scq.arxiv.search import _build_effective_config
+
+    cfg = _build_effective_config(
+        {
+            "titleMultiplier": 2.0,
+            "minScoreToInclude": 5,
+            "profiles": {"fabrication": {"focus": 1, "requires": ["SQUID"], "keywords": {"etch": 5}}},
+        }
+    )
+    plain = {"title": "Etch process", "abstract": "", "claims": ["An etch step."], "cpc_codes": []}
+    assert patent_relevance.score_patent(plain, cfg) == 0
+    # Acronym anchors are matched against the original-case text.
+    sc = {"title": "Etch process", "abstract": "", "claims": ["A SQUID etch step."], "cpc_codes": []}
+    assert patent_relevance.score_patent(sc, cfg) > 0
+
 # ─── store roundtrip ───
 
 

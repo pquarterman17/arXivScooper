@@ -293,7 +293,9 @@ Keywords and ranking parameters are **config-driven**, not hardcoded. The system
 - `data/user_config/relevance.json` — user overrides (gitignored; copy from `.example`)
 
 **Profiles** — each profile has a `focus` multiplier and a list of keywords with weights:
-- `materials`, `coherence`, `characterization`, `readout`, `gates`, `general_scq`, `off_topic`
+- `materials`, `coherence`, `general_scq` (superconducting-specific, always score), `sc_context`, `fabrication`, `characterization`, `readout`, `gates` (gated), `off_topic` (negative: algorithms/QML, spin qubits, unconventional-SC physics)
+
+**Context gate (`requires`)** — a profile's optional anchor list; its keywords only score when the title/abstract mentions one anchor. Defaults gate generic terms on superconducting context (`superconduct`, `transmon`, `Josephson`, `SQUID`, …) so "ALD"/"dephasing"/"TEM"/"TLS" don't lift battery, security or abstract-decoherence papers. The defaults were tuned 2026-09-24 against 3,271 real digest papers (18 days): superconducting qubit/device/materials papers reaching the email rose from 67% to 89%, spin-qubit-only papers in the email fell 25 → 2, and papers above threshold fell from ~54/day to ~16/day. Retune against real digests, not intuition: e.g. gating `tantalum` dropped a genuine Ta-oxide loss paper, so it stays ungated. Patents apply the same gate.
 
 **Author boosts** — substring match on the `authors` field → bonus score points.
 

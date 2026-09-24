@@ -104,6 +104,78 @@ def test_temperature_does_not_score_as_tem_microscopy():
     assert not {"TiN", "TEM", "STEM"} & set(paper["matched_keywords"])
 
 
+
+def _gated_cfg(profiles):
+    return search_mod._build_effective_config(
+        {"titleMultiplier": 2.0, "minScoreToInclude": 5, "profiles": profiles}
+    )
+
+
+def test_requires_gate_blocks_profile_without_anchor(monkeypatch):
+    cfg = _gated_cfg(
+        {"fabrication": {"focus": 1, "requires": ["superconduct"], "keywords": {"ALD": 5}}}
+    )
+    monkeypatch.setattr(search_mod, "_load_relevance_config", lambda: cfg)
+    battery = {"title": "ALD coatings for battery cathodes", "abstract": "ALD of alumina."}
+    sc = {"title": "ALD NbN for superconducting resonators", "abstract": "ALD films."}
+    assert search_mod._score_paper_smart(battery) == 0
+    assert search_mod._score_paper_smart(sc) == (2 + 1) * 5
+    assert sc["matched_profiles"] == ["fabrication"]
+
+
+def test_requires_gate_follows_last_profile_for_duplicate_keyword():
+    # Same last-wins rule as the weight: an ungated later profile un-gates it.
+    cfg = _gated_cfg(
+        {
+            "a": {"focus": 1, "requires": ["superconduct"], "keywords": {"etch": 3}},
+            "b": {"focus": 1, "keywords": {"etch": 4}},
+        }
+    )
+    assert "etch" not in cfg["keywordRequires"]
+    assert cfg["effectiveKeywords"]["etch"] == 4
+
+
+# Real 2026-09 digest papers (abridged). The defaults must put superconducting
+# devices/materials/fab ahead of generic quantum theory, off-domain fab, and
+# spin qubits.
+_SC_FAB = {
+    "title": "Effect of Buried-Interface Preparation for Nb Superconducting Resonators on InP",
+    "abstract": "We fabricate niobium coplanar waveguide resonators by sputtering and "
+    "measure internal quality factors and two-level-system loss.",
+}
+_GENERIC_DECOHERENCE = {
+    "title": "On the Complexity of Finding Decoherence Free Subspaces",
+    "abstract": "Decoherence and dephasing limit coherence; we study the complexity of "
+    "finding decoherence-free subspaces for open quantum systems.",
+}
+_OFF_DOMAIN_ALD = {
+    "title": "Enhancing Conformality in Atomic Layer Deposition through Low Growth Per Cycle",
+    "abstract": "Atomic layer deposition (ALD) thin films on high-aspect-ratio substrates; "
+    "TEM and XPS confirm conformal growth after annealing.",
+}
+
+
+def test_defaults_rank_superconducting_fab_over_generic_papers():
+    search_mod.invalidate_relevance_cache()
+    try:
+        ranked = search_mod.rank_papers(
+            [dict(_GENERIC_DECOHERENCE), dict(_OFF_DOMAIN_ALD), dict(_SC_FAB)], mode="smart"
+        )
+    finally:
+        search_mod.invalidate_relevance_cache()
+    assert [p["title"] for p in ranked] == [_SC_FAB["title"]]  # others below the floor
+
+
+def test_defaults_rank_transmon_above_spin_qubit():
+    search_mod.invalidate_relevance_cache()
+    try:
+        transmon = {"title": "Coherence of a transmon qubit", "abstract": "Qubit dephasing."}
+        spin = {"title": "Coherence of a spin qubit", "abstract": "Qubit dephasing in a quantum dot."}
+        assert search_mod._score_paper_smart(transmon) > 0
+        assert search_mod._score_paper_smart(spin) <= 0
+    finally:
+        search_mod.invalidate_relevance_cache()
+
 # ─── search: budget ───
 
 
