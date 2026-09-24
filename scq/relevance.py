@@ -194,6 +194,9 @@ def _cmd_show(args: argparse.Namespace) -> int:  # noqa: ARG001
         pos = sum(1 for _, w in items if w > 0)
         neg = sum(1 for _, w in items if w < 0)
         print(f"  {pname}: {len(items)} keywords ({pos} positive, {neg} negative)")
+        gate = cfg.get("profileRequires", {}).get(pname)
+        if gate:
+            print(f"      only scores when the paper mentions one of: {', '.join(gate)}")
 
     total = len(cfg["effectiveKeywords"])
     print(f"\nTotal effective keywords: {total}")

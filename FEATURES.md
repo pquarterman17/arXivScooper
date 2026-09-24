@@ -309,14 +309,18 @@ Paper relevance scoring is **config-driven** — keywords, weights, and author b
 - `src/config/defaults/relevance.json` — ship defaults committed to the repo; covers all major SCQ topic areas
 - `data/user_config/relevance.json` — user overrides (gitignored; copy from `relevance.json.example` to start)
 
-**Interest profiles** — seven named profiles, each with a `focus` multiplier and weighted keyword list:
-- `materials` — substrate, deposition, and materials processing terms
-- `coherence` — T1/T2/loss mechanisms
+**Interest profiles** — named profiles, each with a `focus` multiplier and weighted keyword list:
+- `materials` — superconducting materials and resonators (loss tangent, Nb, Ta, NbTiN, granular Al, kinetic inductance)
+- `coherence` — superconducting-qubit types and loss mechanisms (transmon, fluxonium, 0-π, TLS defects, quasiparticle poisoning, flux noise)
+- `general_scq` — broad superconducting-circuit terms
+- `sc_context` — generic terms (coherence, dephasing, T1, thin film, substrate, TiN) that only count in superconducting papers
+- `fabrication` — deposition, lithography, junctions, packaging (flip-chip, TSVs, air bridges)
 - `characterization` — spectroscopy and measurement techniques
-- `readout` — dispersive readout, amplifier chains
-- `gates` — gate fidelity, cross-resonance, two-qubit operations
-- `general_scq` — broad superconducting qubit terms
-- `off_topic` — negative-weight terms that reduce score (e.g., photonics, classical ML)
+- `readout` — dispersive readout, parametric amplifiers
+- `gates` — gate fidelity, cross-resonance, tunable couplers
+- `off_topic` — negative-weight terms (quantum algorithms/ML, spin qubits, unconventional-superconductor physics)
+
+**Context gates** — a profile can set `requires` (a list of anchor terms). Its keywords then score only when the paper mentions one of those anchors. The defaults gate every generic profile on superconducting context (`superconduct`, `transmon`, `Josephson`, `SQUID`, …), so "ALD" or "dephasing" count in a superconducting-qubit paper but not in a battery or abstract decoherence paper. `scq relevance show` lists each profile's gate.
 
 **Author boosts** — substring matches on the `authors` field give a configurable bonus, letting you up-weight papers from groups you follow closely.
 

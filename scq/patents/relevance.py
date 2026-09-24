@@ -69,14 +69,29 @@ def score_patent(patent: dict, cfg: dict | None = None) -> float:
     cpc_boosts: dict[str, float] = cfg.get("cpcBoosts", {})
     assignee_boosts: dict[str, float] = cfg.get("assigneeBoosts", {})
 
-    title_lower = (patent.get("title") or "").lower()
-    body_lower = ((patent.get("abstract") or "") + " " + _claim_text(patent)).lower()
+    from scq.arxiv.search import _requires_met
+
+    keyword_requires: dict[str, tuple[str, ...]] = cfg.get("keywordRequires", {})
+
+    title = patent.get("title") or ""
+    body = (patent.get("abstract") or "") + " " + _claim_text(patent)
+    title_lower = title.lower()
+    body_lower = body.lower()
 
     score = 0.0
     matched_keywords: list[str] = []
     matched_profiles: set[str] = set()
+    unlocked: dict[tuple[str, ...], bool] = {}
 
     for keyword, eff_weight in effective_keywords.items():
+        # Profiles with ``requires`` only count in superconducting-context
+        # patents, same gate as paper scoring (scq.arxiv.search).
+        requires = keyword_requires.get(keyword)
+        if requires:
+            if requires not in unlocked:
+                unlocked[requires] = _requires_met(requires, title, body)
+            if not unlocked[requires]:
+                continue
         kw = keyword.lower()
         # Word-boundary match, NOT substring: patent claim text is long and
         # full of common words, so a naive .count() would match acronyms

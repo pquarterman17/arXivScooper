@@ -295,16 +295,26 @@ def _build_effective_config(cfg: dict) -> dict:
     profiles: dict[str, dict] = cfg.get("profiles") or {}
     effective_keywords: dict[str, float] = {}
     keyword_to_profiles: dict[str, list[str]] = {}
+    # keyword -> anchors, for keywords whose (winning) profile has ``requires``
+    keyword_requires: dict[str, tuple[str, ...]] = {}
+    profile_requires: dict[str, list[str]] = {}
 
     for profile_name, profile in profiles.items():
         focus = float(profile.get("focus", 1.0))
         if focus == 0.0:
             continue  # entire profile silenced
+        requires = tuple(profile.get("requires") or ())
+        if requires:
+            profile_requires[profile_name] = list(requires)
         for kw, weight in (profile.get("keywords") or {}).items():
             eff = float(weight) * focus
             # Last-profile wins for duplicate keywords (consistent with _deep_merge)
             effective_keywords[kw] = eff
             keyword_to_profiles[kw] = keyword_to_profiles.get(kw, []) + [profile_name]
+            if requires:
+                keyword_requires[kw] = requires
+            else:
+                keyword_requires.pop(kw, None)
 
     return {
         "titleMultiplier": title_mult,
@@ -314,6 +324,8 @@ def _build_effective_config(cfg: dict) -> dict:
         "assigneeBoosts": assignee_boosts,
         "effectiveKeywords": effective_keywords,
         "keywordToProfiles": keyword_to_profiles,
+        "keywordRequires": keyword_requires,
+        "profileRequires": profile_requires,
     }
 
 
@@ -800,6 +812,11 @@ def _count_keyword(keyword: str, text: str) -> int:
     return sum(1 for m in hits if any(c.isupper() or c.isdigit() for c in m.group()[1:]))
 
 
+def _requires_met(requires: tuple[str, ...], *texts: str) -> bool:
+    """True when any anchor of a gated profile (``requires``) appears in ``texts``."""
+    return any(_count_keyword(a, t) for a in requires for t in texts)
+
+
 def _score_paper_simple(paper: dict) -> float:
     """Score using the flat ``_FALLBACK_KEYWORDS`` dict (pre-profile algorithm).
 
@@ -849,14 +866,26 @@ def _score_paper_smart(paper: dict) -> float:
     title_mult: float = cfg["titleMultiplier"]
     author_boosts: dict[str, float] = cfg["authorBoosts"]
 
+    keyword_requires: dict[str, tuple[str, ...]] = cfg.get("keywordRequires", {})
+
     title = paper["title"]
     abstract = paper["abstract"]
 
     score: float = 0.0
     matched_keywords: list[str] = []
     matched_profiles: set[str] = set()
+    # A profile with ``requires`` only counts when one of its anchors appears,
+    # so generic terms ("ALD", "dephasing") score in superconducting papers
+    # without dragging in battery chemistry or abstract decoherence theory.
+    unlocked: dict[tuple[str, ...], bool] = {}
 
     for keyword, eff_weight in effective_keywords.items():
+        requires = keyword_requires.get(keyword)
+        if requires:
+            if requires not in unlocked:
+                unlocked[requires] = _requires_met(requires, title, abstract)
+            if not unlocked[requires]:
+                continue
         title_hits = _count_keyword(keyword, title)
         abstract_hits = _count_keyword(keyword, abstract)
         if title_hits > 0 or abstract_hits > 0:

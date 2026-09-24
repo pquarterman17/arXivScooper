@@ -51,6 +51,11 @@
             "minimum": 0,
             "description": "Multiplier applied to all keyword weights in this profile. Set to 0 to silence the entire profile."
           },
+          "requires": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Optional context gate: this profile's keywords only score when at least one of these anchor terms appears in the title or abstract (same word-anchored matching as keywords). Lets generic terms like \"ALD\" or \"dephasing\" count in superconducting papers without boosting unrelated ones."
+          },
           "keywords": {
             "type": "object",
             "description": "Keyword string → integer weight. Negative weights penalise papers. Title hits are multiplied by titleMultiplier.",
