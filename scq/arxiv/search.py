@@ -22,6 +22,7 @@ unit testing with a mocked HTTP layer.
 from __future__ import annotations
 
 import contextlib
+import functools
 import gzip
 import os
 import random
@@ -764,6 +765,41 @@ def _get_ranking_mode() -> str:
         return "smart"
 
 
+def _is_acronym(keyword: str) -> bool:
+    """True for single-token keywords with 2+ capitals/digits (TiN, TEM, T1, cQED)."""
+    return " " not in keyword and sum(c.isupper() or c.isdigit() for c in keyword) >= 2
+
+
+@functools.lru_cache(maxsize=1024)
+def _keyword_regex(keyword: str) -> re.Pattern[str]:
+    if _is_acronym(keyword):
+        return re.compile(r"(?<!\w)" + re.escape(keyword) + r"s?(?!\w)", re.IGNORECASE)
+    return re.compile(r"(?<!\w)" + re.escape(keyword), re.IGNORECASE)
+
+
+def _count_keyword(keyword: str, text: str) -> int:
+    """Count word-anchored, case-insensitive occurrences of ``keyword`` in ``text``.
+
+    A plain substring count let short keywords fire inside unrelated words
+    ("TiN" in "distinct", "TEM" in "temperature", "STEM" in "system", "MBE"
+    in "number"), inflating off-topic papers past relevant ones and out of
+    the email's top slots. So:
+
+    - Phrases/words anchor the left edge only, keeping inflections:
+      "superconducting resonator" still matches "resonators".
+    - Acronyms (see ``_is_acronym``) must be a whole word (plural "s" allowed)
+      and must be written like an acronym — something after the first letter
+      capitalised or a digit — so "stem from" and "drag force" don't count as
+      STEM/DRAG while "TiN", "TLSs" and "cQED" do.
+    """
+    if not keyword:
+        return 0
+    hits = _keyword_regex(keyword).finditer(text)
+    if not _is_acronym(keyword):
+        return sum(1 for _ in hits)
+    return sum(1 for m in hits if any(c.isupper() or c.isdigit() for c in m.group()[1:]))
+
+
 def _score_paper_simple(paper: dict) -> float:
     """Score using the flat ``_FALLBACK_KEYWORDS`` dict (pre-profile algorithm).
 
@@ -771,16 +807,15 @@ def _score_paper_simple(paper: dict) -> float:
     overhaul: title hits count 2x abstract hits, no author boosts, no
     profile focus multipliers. ``paper`` is mutated in-place.
     """
-    title_lower = paper["title"].lower()
-    text_lower = (paper["title"] + " " + paper["abstract"]).lower()
+    title = paper["title"]
+    text = paper["title"] + " " + paper["abstract"]
 
     score: float = 0.0
     matched_keywords: list[str] = []
 
     for keyword, weight in _FALLBACK_KEYWORDS.items():
-        kw_lower = keyword.lower()
-        title_hits = title_lower.count(kw_lower)
-        abstract_hits = text_lower.count(kw_lower) - title_hits
+        title_hits = _count_keyword(keyword, title)
+        abstract_hits = _count_keyword(keyword, text) - title_hits
         if title_hits > 0 or abstract_hits > 0:
             kw_score = (title_hits * 2 + abstract_hits) * weight
             score += kw_score
@@ -814,17 +849,16 @@ def _score_paper_smart(paper: dict) -> float:
     title_mult: float = cfg["titleMultiplier"]
     author_boosts: dict[str, float] = cfg["authorBoosts"]
 
-    title_lower = paper["title"].lower()
-    abstract_lower = paper["abstract"].lower()
+    title = paper["title"]
+    abstract = paper["abstract"]
 
     score: float = 0.0
     matched_keywords: list[str] = []
     matched_profiles: set[str] = set()
 
     for keyword, eff_weight in effective_keywords.items():
-        kw_lower = keyword.lower()
-        title_hits = title_lower.count(kw_lower)
-        abstract_hits = abstract_lower.count(kw_lower)
+        title_hits = _count_keyword(keyword, title)
+        abstract_hits = _count_keyword(keyword, abstract)
         if title_hits > 0 or abstract_hits > 0:
             kw_score = (title_hits * title_mult + abstract_hits) * eff_weight
             score += kw_score

@@ -1,78 +1,79 @@
 #!/usr/bin/env python3
-"""TEMPORARY diagnostic — never merged. Find the Nb-strain resonator paper
-the digest missed, and show exactly how the live ranker scored it."""
+"""TEMPORARY diagnostic — never merged. Reconstruct the 9/23 digest ranking
+from run 157's artifact and rescore it with left-boundary keyword matching."""
 
 from __future__ import annotations
 
+import glob
 import html
 import re
-import urllib.error
-import urllib.request
 
-from scq.arxiv.search import rank_papers
+import scq.arxiv.search as S
 
-UA = "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
-DIGEST_CATS = ["quant-ph", "cond-mat.supr-con", "cond-mat.mtrl-sci", "cond-mat.mes-hall"]
-EXTRA_CATS = ["physics.app-ph"]
-TITLE_HIT = re.compile(r"\b(Nb|niobium|strain|strained|stress)\b", re.I)
+TARGET = "2609.26714"
+EMAIL_CAP = 15
 
+files = glob.glob("art/**/*.html", recursive=True)
+print("artifact files:", files)
+doc = open(files[0], encoding="utf-8").read()
 
-def get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return r.status, r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, ""
-    except Exception as e:  # noqa: BLE001
-        return type(e).__name__, ""
-
-
-# 1. Scan the past week's listings, primaries + cross-lists.
-found = {}
-for cat in DIGEST_CATS + EXTRA_CATS:
-    st, body = get(f"https://arxiv.org/list/{cat}/pastweek?show=2000")
-    ids = re.findall(r'href\s*=\s*"/abs/(\d{4}\.\d{4,5})"', body)
-    titles = re.findall(r"list-title[^>]*>\s*<span[^>]*>Title:</span>\s*(.*?)</div>", body, re.S)
-    print(f"list {cat:18} HTTP {st}  ids={len(ids)} titles={len(titles)}")
-    for aid, t in zip(ids, titles, strict=False):
-        t = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", t))).strip()
-        if TITLE_HIT.search(t):
-            found.setdefault(aid, {"title": t, "lists": []})["lists"].append(cat)
-
-print(f"\n{len(found)} candidate title(s)\n")
-
-# 2. Pull each candidate's abstract + categories, then score with the live ranker.
+cards = re.findall(
+    r'<div class="paper-card".*?score-badge [^"]*">([^<]*)</span>.*?'
+    r'<a href="[^"]*" target="_blank">(.*?)</a></div>\s*<div class="paper-meta">(.*?)</div>\s*'
+    r'<div class="paper-abstract"[^>]*>(.*?)</div>',
+    doc,
+    re.S,
+)
 papers = []
-for aid, info in found.items():
-    st, body = get(f"https://arxiv.org/abs/{aid}")
-    m = re.search(r'<meta name="citation_abstract" content="(.*?)"', body, re.S)
-    abstract = html.unescape(m.group(1)) if m else ""
-    subj = re.search(r'<td class="tablecell subjects">(.*?)</td>', body, re.S)
-    cats = re.findall(r"\(([a-z\-]+(?:\.[A-Za-z\-]+)?)\)", subj.group(1)) if subj else []
-    date = re.search(r'<meta name="citation_date" content="([^"]+)"', body)
-    authors = re.findall(r'<meta name="citation_author" content="([^"]+)"', body)
+for score, title, meta, abstract in cards:
+    aid = re.search(r"(\d{4}\.\d{4,5})", meta).group(1)
+    parts = [x.strip() for x in html.unescape(re.sub(r"<[^>]+>", "", meta)).split("·")]
     papers.append(
         {
             "id": aid,
-            "title": info["title"],
-            "abstract": abstract,
-            "authors": ", ".join(authors),
-            "categories": cats,
-            "listed_in": info["lists"],
-            "date": date.group(1) if date else "?",
+            "title": html.unescape(title).strip(),
+            "abstract": html.unescape(abstract).strip(),
+            "authors": parts[0] if parts else "",
+            "categories": [c.strip() for c in (parts[2] if len(parts) > 2 else "").split(",")],
+            "orig": float(score),
         }
     )
+print(f"{len(papers)} cards parsed")
+orig = sorted(papers, key=lambda p: -p["orig"])
+emailed = [p for p in orig if p["orig"] >= 5][:EMAIL_CAP]
+rank = next((i for i, p in enumerate(orig, 1) if p["id"] == TARGET), None)
+print(
+    f"\nORIGINAL: {TARGET} rank={rank}; in email top {EMAIL_CAP}: "
+    f"{any(p['id'] == TARGET for p in emailed)}; >=5 count={sum(p['orig'] >= 5 for p in orig)}"
+)
+print(f"email cutoff score = {emailed[-1]['orig'] if emailed else None}")
 
-for p in rank_papers(papers):
-    in_digest_cats = any(c in DIGEST_CATS for c in p["categories"])
-    print(f"=== {p['id']}  score={p['relevance_score']:.1f}  date={p['date']}")
-    print(f"    {p['title']}")
-    print(f"    categories={p['categories']}  fetched_by_digest={in_digest_cats}")
-    print(f"    matched={p['matched_keywords']}")
-    if re.search(r"strain", p["title"] + p["abstract"], re.I) and re.search(
-        r"\b(Nb|niobium)\b", p["title"] + p["abstract"], re.I
-    ):
-        print("    >>> Nb + strain match: full abstract follows")
-        print("    " + re.sub(r"\s+", " ", p["abstract"])[:1400])
-    print()
+
+def run(label):
+    ps = [dict(p) for p in papers]
+    ranked = S.rank_papers(ps, mode="smart")
+    r = next((i for i, p in enumerate(ranked, 1) if p["id"] == TARGET), None)
+    print(f"\n===== {label}: {len(ranked)} kept; {TARGET} rank={r}")
+    for i, p in enumerate(ranked[:25], 1):
+        mark = "*" if i <= EMAIL_CAP else " "
+        print(f"{mark}{i:3} {p['relevance_score']:7.1f} {p['id']} {p['title'][:70]}")
+        print(f"          {p['matched_keywords'][:8]}")
+    return {p["id"]: p["relevance_score"] for p in ranked}
+
+
+_fixed = S._count_keyword
+S._count_keyword = lambda kw, text: text.lower().count(kw.lower())
+before = run("OLD substring")
+S._count_keyword = _fixed
+after = run("NEW left-boundary")
+
+changed = [
+    (k, before.get(k, 0), after.get(k, 0))
+    for k in set(before) | set(after)
+    if abs(before.get(k, 0) - after.get(k, 0)) > 0.01
+]
+print(
+    f"\n{len(changed)} scores changed; dropped below threshold: "
+    f"{sum(1 for k in before if k not in after)}; newly included: "
+    f"{sum(1 for k in after if k not in before)}"
+)
