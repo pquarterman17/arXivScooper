@@ -1,95 +1,62 @@
 #!/usr/bin/env python3
-"""Where is arXiv rejecting us right now — the API, RSS, or neither?
-
-First thing to run when a digest run fails. On 2026-09-18 the Atom API origin
-(/api/query) returned HTTP 406 to every request for hours while Fastly kept
-serving a few cached URLs, so ad-hoc checks looked fine while every scheduled
-digest failed. rss.arxiv.org was up the whole time. This checks both, so you
-can tell an API outage (the digest falls back to RSS on its own) from a total
-outage (nothing to do but wait) from a local network problem.
-
-Exit 0 if any source answered, 1 if none did.
-
-Run: python tools/arxiv_probe.py
-"""
+"""TEMPORARY diagnostic — never merged. Build a relevance-tuning corpus from
+every downloaded digest artifact (art/) plus today's full RSS batch."""
 
 from __future__ import annotations
 
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+import glob
+import html
+import json
+import os
+import re
 
-UA = "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
-CATS = ["quant-ph", "cond-mat.supr-con"]
+from scq.arxiv.rss import fetch_rss_papers
 
-
-def _status(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
-    try:
-        with urllib.request.urlopen(req, timeout=45) as r:
-            return r.status, len(r.read())
-    except urllib.error.HTTPError as e:
-        return e.code, 0
-    except Exception as e:  # noqa: BLE001
-        return type(e).__name__, 0
-
-
-def main():
-    from scq.arxiv.rss import RSS_BASE
-    from scq.arxiv.search import _api_bases
-
-    # A realistic query: a tiny one can be served from cache and hide an
-    # origin that is rejecting everything the digest actually asks for.
-    qs = urllib.parse.urlencode(
-        {
-            "search_query": "cat:quant-ph",
-            "sortBy": "submittedDate",
-            "sortOrder": "descending",
-            "max_results": "200",
-        }
+corpus = {}
+for path in sorted(glob.glob("art/**/*.html", recursive=True)):
+    doc = open(path, encoding="utf-8").read()
+    day = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(path))
+    cards = re.findall(
+        r'<div class="paper-card".*?score-badge [^"]*">([^<]*)</span>.*?'
+        r'<a href="[^"]*" target="_blank">(.*?)</a></div>\s*<div class="paper-meta">(.*?)</div>\s*'
+        r'<div class="paper-abstract"[^>]*>(.*?)</div>',
+        doc,
+        re.S,
     )
-
-    api_ok = rss_ok = False
-    codes = []
-
-    print("Atom API:")
-    for base in _api_bases():
-        st, n = _status(f"{base}?{qs}")
-        codes.append(st)
-        api_ok = api_ok or st == 200
-        print(f"  {urllib.parse.urlparse(base).netloc}: {st} ({n} bytes)")
-
-    print("RSS:")
-    for cat in CATS:
-        st, n = _status(f"{RSS_BASE}/{cat}")
-        codes.append(st)
-        rss_ok = rss_ok or st == 200
-        print(f"  {cat}: {st} ({n} bytes)")
-
-    print()
-    if api_ok and rss_ok:
-        print("Both sources are up. A digest failure now is not arXiv availability.")
-    elif rss_ok:
-        print(
-            "The Atom API is rejecting us but RSS is up — the digest falls back to\n"
-            "RSS automatically, so it will still send today's papers. Nothing to fix."
+    for _score, title, meta, abstract in cards:
+        m = re.search(r"(\d{4}\.\d{4,5})", meta)
+        if not m:
+            continue
+        parts = [x.strip() for x in html.unescape(re.sub(r"<[^>]+>", "", meta)).split("·")]
+        corpus.setdefault(
+            m.group(1),
+            {
+                "id": m.group(1),
+                "title": html.unescape(title).strip(),
+                "abstract": html.unescape(abstract).strip(),
+                "authors": parts[0] if parts else "",
+                "categories": [c.strip() for c in (parts[2] if len(parts) > 2 else "").split(",")],
+                "day": day.group(1) if day else "?",
+                "src": "digest",
+            },
         )
-    elif api_ok:
-        print("RSS is down but the API works — the digest uses the API first anyway.")
-    elif all(isinstance(c, str) for c in codes):
-        print(
-            "Nothing reached arXiv at all (network errors, not HTTP responses).\n"
-            "Check connectivity/proxy from this machine."
-        )
-    else:
-        print(
-            f"Neither source answered (codes: {sorted(set(map(str, codes)))}).\n"
-            "Wait it out: the next scheduled run recovers the missed papers via\n"
-            "the overlapping lookback window."
-        )
-    return 0 if (api_ok or rss_ok) else 1
+    print(f"{path}: {len(cards)} cards")
 
-
-if __name__ == "__main__":
-    sys.exit(main())
+cats = ["quant-ph", "cond-mat.supr-con", "cond-mat.mtrl-sci", "cond-mat.mes-hall", "physics.app-ph"]
+rss = fetch_rss_papers(cats, days_back=1)
+for p in rss:
+    corpus.setdefault(
+        p["id"],
+        {
+            "id": p["id"],
+            "title": p["title"],
+            "abstract": p["abstract"],
+            "authors": p.get("authors", ""),
+            "categories": p.get("categories", []),
+            "day": "rss-today",
+            "src": "rss",
+        },
+    )
+print(f"rss papers: {len(rss)}; corpus total: {len(corpus)}")
+os.makedirs("corpus", exist_ok=True)
+json.dump(list(corpus.values()), open("corpus/corpus.json", "w"), ensure_ascii=False)

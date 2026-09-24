@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: read
 
 jobs:
   probe:
@@ -20,5 +21,19 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install .
+      - name: Download every digest artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh run list --workflow arxiv_digest.yml --limit 100 --json databaseId -q '.[].databaseId'); do
+            gh run download "$id" -D "art/$id" 2>/dev/null || true
+          done
       - name: Probe arXiv from the runner
         run: python -u tools/arxiv_probe.py
+      - name: Push corpus
+        run: |
+          git config user.name "corpus-bot"
+          git config user.email "corpus-bot@users.noreply.github.com"
+          git add corpus/corpus.json
+          git commit -m "TEMP corpus (not for merge)"
+          git push origin HEAD:${{ github.ref_name }}
