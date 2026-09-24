@@ -71,6 +71,39 @@ def test_rank_papers_descending():
     assert all(p["title"] != "Off topic" for p in out)  # below-floor papers dropped
 
 
+@pytest.mark.parametrize(
+    ("keyword", "text", "hits"),
+    [
+        # Acronyms inside ordinary words must not count (the 2026-09 misses:
+        # these inflated off-topic papers past relevant materials papers).
+        ("TiN", "distinct continuous certain setting tiny", 0),
+        ("TEM", "temperature system template", 0),
+        ("STEM", "the ecosystem; losses stem from defects; it stems", 0),
+        ("MBE", "a number of members", 0),
+        ("DRAG", "viscous drag force", 0),
+        # ...but real acronym uses do, including plurals and digits.
+        ("TiN", "TiN films; TiN-capped Nb", 2),
+        ("TLS", "coupled TLSs and a TLS bath", 2),
+        ("T1", "T1 of 300 us; T10 is unrelated", 1),
+        ("cQED", "cQED and CQED architectures", 2),
+        # Phrases keep inflections but need a word start.
+        ("superconducting resonator", "Superconducting Resonators", 1),
+        ("niobium", "niobium; Niobium-based; hyperniobium", 2),
+    ],
+)
+def test_count_keyword_is_word_anchored(keyword, text, hits):
+    assert search_mod._count_keyword(keyword, text) == hits
+
+
+def test_temperature_does_not_score_as_tem_microscopy():
+    paper = {
+        "title": "Distinct phases at low temperature in a kagome system",
+        "abstract": "Continuous transitions occur at a certain temperature.",
+    }
+    search_mod._score_paper_smart(paper)
+    assert not {"TiN", "TEM", "STEM"} & set(paper["matched_keywords"])
+
+
 # ─── search: budget ───
 
 
@@ -549,3 +582,32 @@ def test_send_email_digest_uses_a_distinct_subject_when_empty(monkeypatch):
 
     assert email_mod.send_email_digest([], "2026-09-18") is True
     assert sent == ["SCQ Digest: no new papers - 2026-09-18"]
+
+
+def test_email_lists_up_to_email_max_papers(monkeypatch):
+    """The old hardcoded 15 cut real SCQ papers ranked 16-17 on 2026-09-23."""
+    sent = []
+    monkeypatch.setattr(email_mod, "EMAIL_FROM", "a@b.test")
+    monkeypatch.setattr(email_mod, "EMAIL_APP_PASSWORD", "pw")
+    monkeypatch.setattr(
+        email_mod,
+        "_load_email_recipients",
+        lambda: [{"email": "to@b.test", "name": "", "frequency": "daily"}],
+    )
+    monkeypatch.setattr(email_mod, "_deliver", lambda r, s, plain, h: sent.append(plain) or True)
+    papers = [
+        {
+            "title": f"Paper {i:02d}",
+            "relevance_score": 100 - i,
+            "matched_keywords": [],
+            "abs_url": f"https://arxiv.org/abs/{i}",
+            "pdf_url": f"https://arxiv.org/pdf/{i}",
+            "short_authors": "A",
+            "published": "2026-09-23",
+        }
+        for i in range(40)
+    ]
+    assert email_mod.send_email_digest(papers, "2026-09-23") is True
+    assert email_mod.EMAIL_MAX_PAPERS == 30
+    assert "Paper 29" in sent[0]
+    assert "Paper 30" not in sent[0]

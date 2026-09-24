@@ -299,6 +299,8 @@ Keywords and ranking parameters are **config-driven**, not hardcoded. The system
 
 **Tunable parameters:** `titleMultiplier` (title keyword hits score higher), `minScoreToInclude` (paper score threshold for digest inclusion).
 
+**Keyword matching is word-anchored, not substring** (`_count_keyword` in `scq/arxiv/search.py`). Phrases must start at a word boundary but keep inflections (`superconducting resonator` → "resonators"); acronyms (single token with 2+ capitals/digits: `TiN`, `TEM`, `STEM`, `MBE`, `T1`, `cQED`) must be a whole word (plural `s` allowed) written acronym-style, so "stem from"/"drag" don't count. Substring matching made `TiN`/`TEM`/`STEM` fire on "distinct"/"temperature"/"system": on 2026-09-23 all 181 fetched papers cleared the threshold and a stressed-Nb-film resonator paper ranked #17, cut by the email cap (now 30, `EMAIL_MAX_PAPERS` in `scq/arxiv/email.py`; was 15). Don't revert to `.count()`.
+
 **Patent scoring** (`scq/patents/relevance.py`, `score_patent`) reuses the same config plus two patent-only maps: `cpcBoosts` (CPC-prefix → points, e.g. `G06N10`, `H10N60`) and `assigneeBoosts` (assignee substring → points, the patent analogue of `authorBoosts`). Patent keyword matching is **word-boundary** anchored (not substring) so acronyms like `MBE`/`TiN` don't false-match inside `number`/`destination`. `scq relevance test <patent-number>` scores a stored patent and explains the CPC/assignee/keyword matches. Other patent CLI: `scq patents summarize <num>` (LLM summary via Anthropic if keyed, else prints the prompt) and `scq patents monitor --assignee NAME` (recent-filings tracker; dormant until a PatentsView key is stored).
 
 **CLI commands for relevance:**

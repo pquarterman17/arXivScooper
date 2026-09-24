@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   probe:
@@ -21,8 +20,5 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install .
-      - run: gh run download 35842425571 -n digest-35842425571 -D art
-        env:
-          GH_TOKEN: ${{ github.token }}
       - name: Probe arXiv from the runner
         run: python -u tools/arxiv_probe.py

@@ -1,79 +1,95 @@
 #!/usr/bin/env python3
-"""TEMPORARY diagnostic — never merged. Reconstruct the 9/23 digest ranking
-from run 157's artifact and rescore it with left-boundary keyword matching."""
+"""Where is arXiv rejecting us right now — the API, RSS, or neither?
+
+First thing to run when a digest run fails. On 2026-09-18 the Atom API origin
+(/api/query) returned HTTP 406 to every request for hours while Fastly kept
+serving a few cached URLs, so ad-hoc checks looked fine while every scheduled
+digest failed. rss.arxiv.org was up the whole time. This checks both, so you
+can tell an API outage (the digest falls back to RSS on its own) from a total
+outage (nothing to do but wait) from a local network problem.
+
+Exit 0 if any source answered, 1 if none did.
+
+Run: python tools/arxiv_probe.py
+"""
 
 from __future__ import annotations
 
-import glob
-import html
-import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 
-import scq.arxiv.search as S
+UA = "SCQDigest/1.0 (+https://github.com/pquarterman17/arXivScooper)"
+CATS = ["quant-ph", "cond-mat.supr-con"]
 
-TARGET = "2609.26714"
-EMAIL_CAP = 15
 
-files = glob.glob("art/**/*.html", recursive=True)
-print("artifact files:", files)
-doc = open(files[0], encoding="utf-8").read()
+def _status(url):
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            return r.status, len(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, 0
+    except Exception as e:  # noqa: BLE001
+        return type(e).__name__, 0
 
-cards = re.findall(
-    r'<div class="paper-card".*?score-badge [^"]*">([^<]*)</span>.*?'
-    r'<a href="[^"]*" target="_blank">(.*?)</a></div>\s*<div class="paper-meta">(.*?)</div>\s*'
-    r'<div class="paper-abstract"[^>]*>(.*?)</div>',
-    doc,
-    re.S,
-)
-papers = []
-for score, title, meta, abstract in cards:
-    aid = re.search(r"(\d{4}\.\d{4,5})", meta).group(1)
-    parts = [x.strip() for x in html.unescape(re.sub(r"<[^>]+>", "", meta)).split("·")]
-    papers.append(
+
+def main():
+    from scq.arxiv.rss import RSS_BASE
+    from scq.arxiv.search import _api_bases
+
+    # A realistic query: a tiny one can be served from cache and hide an
+    # origin that is rejecting everything the digest actually asks for.
+    qs = urllib.parse.urlencode(
         {
-            "id": aid,
-            "title": html.unescape(title).strip(),
-            "abstract": html.unescape(abstract).strip(),
-            "authors": parts[0] if parts else "",
-            "categories": [c.strip() for c in (parts[2] if len(parts) > 2 else "").split(",")],
-            "orig": float(score),
+            "search_query": "cat:quant-ph",
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+            "max_results": "200",
         }
     )
-print(f"{len(papers)} cards parsed")
-orig = sorted(papers, key=lambda p: -p["orig"])
-emailed = [p for p in orig if p["orig"] >= 5][:EMAIL_CAP]
-rank = next((i for i, p in enumerate(orig, 1) if p["id"] == TARGET), None)
-print(
-    f"\nORIGINAL: {TARGET} rank={rank}; in email top {EMAIL_CAP}: "
-    f"{any(p['id'] == TARGET for p in emailed)}; >=5 count={sum(p['orig'] >= 5 for p in orig)}"
-)
-print(f"email cutoff score = {emailed[-1]['orig'] if emailed else None}")
+
+    api_ok = rss_ok = False
+    codes = []
+
+    print("Atom API:")
+    for base in _api_bases():
+        st, n = _status(f"{base}?{qs}")
+        codes.append(st)
+        api_ok = api_ok or st == 200
+        print(f"  {urllib.parse.urlparse(base).netloc}: {st} ({n} bytes)")
+
+    print("RSS:")
+    for cat in CATS:
+        st, n = _status(f"{RSS_BASE}/{cat}")
+        codes.append(st)
+        rss_ok = rss_ok or st == 200
+        print(f"  {cat}: {st} ({n} bytes)")
+
+    print()
+    if api_ok and rss_ok:
+        print("Both sources are up. A digest failure now is not arXiv availability.")
+    elif rss_ok:
+        print(
+            "The Atom API is rejecting us but RSS is up — the digest falls back to\n"
+            "RSS automatically, so it will still send today's papers. Nothing to fix."
+        )
+    elif api_ok:
+        print("RSS is down but the API works — the digest uses the API first anyway.")
+    elif all(isinstance(c, str) for c in codes):
+        print(
+            "Nothing reached arXiv at all (network errors, not HTTP responses).\n"
+            "Check connectivity/proxy from this machine."
+        )
+    else:
+        print(
+            f"Neither source answered (codes: {sorted(set(map(str, codes)))}).\n"
+            "Wait it out: the next scheduled run recovers the missed papers via\n"
+            "the overlapping lookback window."
+        )
+    return 0 if (api_ok or rss_ok) else 1
 
 
-def run(label):
-    ps = [dict(p) for p in papers]
-    ranked = S.rank_papers(ps, mode="smart")
-    r = next((i for i, p in enumerate(ranked, 1) if p["id"] == TARGET), None)
-    print(f"\n===== {label}: {len(ranked)} kept; {TARGET} rank={r}")
-    for i, p in enumerate(ranked[:25], 1):
-        mark = "*" if i <= EMAIL_CAP else " "
-        print(f"{mark}{i:3} {p['relevance_score']:7.1f} {p['id']} {p['title'][:70]}")
-        print(f"          {p['matched_keywords'][:8]}")
-    return {p["id"]: p["relevance_score"] for p in ranked}
-
-
-_fixed = S._count_keyword
-S._count_keyword = lambda kw, text: text.lower().count(kw.lower())
-before = run("OLD substring")
-S._count_keyword = _fixed
-after = run("NEW left-boundary")
-
-changed = [
-    (k, before.get(k, 0), after.get(k, 0))
-    for k in set(before) | set(after)
-    if abs(before.get(k, 0) - after.get(k, 0)) > 0.01
-]
-print(
-    f"\n{len(changed)} scores changed; dropped below threshold: "
-    f"{sum(1 for k in before if k not in after)}; newly included: "
-    f"{sum(1 for k in after if k not in before)}"
-)
+if __name__ == "__main__":
+    sys.exit(main())
