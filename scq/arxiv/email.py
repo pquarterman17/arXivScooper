@@ -46,6 +46,11 @@ except ImportError:
     EMAIL_FROM = os.environ.get("SCQ_EMAIL_FROM", "")
     EMAIL_APP_PASSWORD = os.environ.get("SCQ_EMAIL_APP_PASSWORD", "")
 
+# Most papers one email lists (the HTML digest artifact keeps them all). Was
+# 15, which on 2026-09-23 cut genuine superconducting-qubit papers at ranks
+# 16-17; digest.maxPapers still applies first when set.
+EMAIL_MAX_PAPERS = 30
+
 # Repo root used by the legacy email_recipients.json fallback.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -205,7 +210,7 @@ def send_email_digest(papers, digest_date, frequency="daily", context=None):
         print(f"  No {frequency} email recipients configured")
         return False
 
-    top_papers = [p for p in papers if p["relevance_score"] >= 5][:15]
+    top_papers = [p for p in papers if p["relevance_score"] >= 5][:EMAIL_MAX_PAPERS]
     starred = [p for p in top_papers if p["relevance_score"] >= 20]
 
     if not papers:
