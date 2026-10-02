@@ -26,6 +26,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
+from scq.arxiv.common import ArxivFetchError, _make_short_authors
+
 RSS_BASE = "https://rss.arxiv.org/rss"
 
 # Floor on the lookback applied to RSS entries, in days.
@@ -85,19 +87,17 @@ def _entry_published(entry):
         return None
 
 
-def fetch_rss_papers(categories, days_back=1, fetcher=None):
+def fetch_rss_papers(categories, *, fetcher, days_back=1):
     """Return papers from the per-category RSS feeds.
 
-    ``fetcher`` is the callable used to retrieve a URL, defaulting to
-    :func:`scq.arxiv.search._arxiv_get`; it must return bytes or None. Injected
-    so tests exercise parsing without touching the network, and so the caller's
-    retry/budget policy is reused rather than duplicated.
+    ``fetcher`` is the callable used to retrieve a URL (the caller passes
+    :func:`scq.arxiv.search._arxiv_get`); it must return bytes or None. It is
+    injected so tests exercise parsing without touching the network, and so the
+    caller's retry/budget policy is reused rather than duplicated.
     """
     import feedparser
 
-    from scq.arxiv.search import ArxivFetchError, _arxiv_get, _make_short_authors
-
-    get = fetcher or _arxiv_get
+    get = fetcher
     reachable = 0
     # Never let a narrow caller window discard the only batch the feed has.
     effective_days = max(days_back, _MIN_LOOKBACK_DAYS)

@@ -11,11 +11,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import pytest
 
 from scq.arxiv import rss as rss_mod
 from scq.arxiv import search as arxiv_search
+
+
+def _is_rss_host(url):
+    """True when ``url`` points at the RSS host (exact hostname, not a substring)."""
+    return urlsplit(url).hostname == "rss.arxiv.org"
 
 
 def _rss(entries):
@@ -110,7 +116,7 @@ def test_fetch_arxiv_papers_falls_back_to_rss_when_the_api_gives_nothing():
     feed = _rss([("2609.00006", "Recovered via RSS", "A. Smith", "quant-ph", TODAY)])
 
     def fake_get(url, label, **_kw):
-        return feed if "rss.arxiv.org" in url else None
+        return feed if _is_rss_host(url) else None
 
     with patch.object(arxiv_search, "_arxiv_get", fake_get):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=3, max_results=10)
@@ -209,7 +215,7 @@ def test_reachable_but_item_less_feeds_are_a_quiet_day_not_a_failure():
 
     def fake_get(url, label, **_kw):
         # API is tried first and is down; the feeds answer with no items.
-        return empty_feed if "rss.arxiv.org" in url else None
+        return empty_feed if _is_rss_host(url) else None
 
     with patch.object(arxiv_search, "_arxiv_get", fake_get):
         papers = arxiv_search.fetch_arxiv_papers(["quant-ph"], days_back=7, max_results=10)
