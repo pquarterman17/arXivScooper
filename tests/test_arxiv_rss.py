@@ -140,7 +140,7 @@ def test_rss_fallback_runs_even_when_the_api_spent_the_whole_budget():
     feed = _rss([("2609.00007", "Recovered", "A. Smith", "quant-ph", TODAY)])
 
     def fake_urlopen(req, timeout=None):
-        if "rss.arxiv.org" not in req.full_url:
+        if not _is_rss_host(req.full_url):
             raise AssertionError("API should not be reached in this test")
 
         class _Resp:
