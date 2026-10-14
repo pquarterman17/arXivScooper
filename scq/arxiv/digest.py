@@ -388,6 +388,13 @@ def main(argv=None):
             sys.exit(EXIT_FETCH_FAILED)
 
     fetched_count = len(papers)
+    # A blank title is shown as the arXiv id in the digest, but it means the
+    # feed entry parsed badly; leave a trail in the run log so it can be traced.
+    untitled = [p["id"] for p in papers if not (p.get("title") or "").strip()]
+    if untitled:
+        print(
+            f"  Warning: {len(untitled)} paper(s) came back with no title: {', '.join(untitled[:10])}"
+        )
     if papers:
         print(f"\nRanking {len(papers)} papers...")
         papers = rank_papers(papers)

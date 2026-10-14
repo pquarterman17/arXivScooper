@@ -27,3 +27,13 @@ def _make_short_authors(authors):
     if len(authors) == 2:
         return f"{authors[0].split()[-1]} & {authors[1].split()[-1]}"
     return f"{authors[0].split()[-1]} et al."
+
+
+def display_title(paper) -> str:
+    """The title to show for ``paper``, never blank.
+
+    A paper whose feed entry carried no usable title still has to be a
+    clickable row in the digest, so fall back to its arXiv id.
+    """
+    title = (paper.get("title") or "").strip()
+    return title or f"arXiv:{paper.get('id', '?')} (title unavailable)"

@@ -17,7 +17,9 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
+from html import escape as _esc
 
+from scq.arxiv.common import display_title
 from scq.arxiv.search import ARXIV_CATEGORIES
 
 # ─── HTML Digest Generator ───
@@ -163,11 +165,14 @@ def generate_html_digest(papers, digest_date, output_path):
                 "score-high" if score >= 20 else ("score-med" if score >= 5 else "score-low")
             )
             kw_html = "".join(
-                f'<span class="kw-tag">{kw}</span>' for kw in p["matched_keywords"][:6]
+                f'<span class="kw-tag">{_esc(kw)}</span>' for kw in p["matched_keywords"][:6]
             )
             safe_id = p["id"].replace(".", "_")
-            authors_short = p["short_authors"]
-            cats = ", ".join(p["categories"][:3])
+            authors_short = _esc(p["short_authors"])
+            cats = _esc(", ".join(p["categories"][:3]))
+            title = _esc(display_title(p))
+            abs_url = _esc(p["abs_url"], quote=True)
+            pdf_url = _esc(p["pdf_url"], quote=True)
 
             # Escape HTML in abstract
             abstract = p["abstract"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -194,10 +199,10 @@ def generate_html_digest(papers, digest_date, output_path):
             cards += f"""
   <div class="paper-card" id="card-{safe_id}">
     <span class="score-badge {score_class}">{score}</span>
-    <div class="paper-title"><a href="{p["abs_url"]}" target="_blank">{p["title"]}</a></div>
+    <div class="paper-title"><a href="{abs_url}" target="_blank">{title}</a></div>
     <div class="paper-meta">
       {authors_short} &middot; {p["published"][:10]} &middot; {cats}
-      &middot; <a href="{p["abs_url"]}" target="_blank">{p["id"]}</a>
+      &middot; <a href="{abs_url}" target="_blank">{p["id"]}</a>
     </div>
     <div class="paper-abstract" id="abs-{safe_id}">{abstract}</div>
     <button class="expand-btn" onclick="toggleAbstract('{safe_id}')">show more</button>
@@ -207,7 +212,7 @@ def generate_html_digest(papers, digest_date, output_path):
         <button class="btn-add" id="btn-add-{safe_id}" onclick="triagePaper('{safe_id}', 'add', '{paper_json}')">+ Read List</button>
         <button class="btn-star" id="btn-star-{safe_id}" onclick="triagePaper('{safe_id}', 'star', '{paper_json}')">&#9733; Star</button>
         <button class="btn-ignore" id="btn-ignore-{safe_id}" onclick="triagePaper('{safe_id}', 'ignore')">&#10005; Ignore</button>
-        <a class="btn-pdf" href="{p["pdf_url"]}" target="_blank">PDF</a>
+        <a class="btn-pdf" href="{pdf_url}" target="_blank">PDF</a>
         <span class="triage-status" id="status-{safe_id}"></span>
       </div>
     </div>
