@@ -82,6 +82,15 @@ def filter_unsent(papers, sent, *, id_key: str = "id"):
     return [p for p in papers if p.get(id_key) not in sent]
 
 
+def filter_sent_on(papers, sent, date_str: str, *, id_key: str = "id"):
+    """Return the subset of ``papers`` first emailed on ``date_str``.
+
+    The inverse of :func:`filter_unsent` for a single day: used to re-send a
+    past digest exactly as it went out, rather than whatever is new now.
+    """
+    return [p for p in papers if sent.get(p.get(id_key)) == date_str]
+
+
 def record_sent(papers, sent, *, date_str: str, id_key: str = "id") -> dict[str, str]:
     """Add each paper's ID to ``sent`` (in place) stamped with ``date_str``.
 

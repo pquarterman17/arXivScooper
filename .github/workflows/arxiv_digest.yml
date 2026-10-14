@@ -23,6 +23,11 @@ on:
           - '7'
           - '14'
           - '30'
+      resend_date:
+        description: 'Re-send the digest that went out on this date (YYYY-MM-DD). Leave blank for a normal run.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read  # Digests are artifacts; dedup state lives in actions/cache
@@ -87,6 +92,7 @@ jobs:
           SCQ_EMAIL_FROM: ${{ secrets.SCQ_EMAIL_FROM }}
           SCQ_EMAIL_APP_PASSWORD: ${{ secrets.SCQ_EMAIL_APP_PASSWORD }}
           SCQ_EMAIL_TO: ${{ secrets.SCQ_EMAIL_TO }}
+          RESEND_DATE: ${{ github.event.inputs.resend_date }}
         run: |
           # Manual trigger: use the selected days_back value.
           # Scheduled trigger: 7 days — a wide, overlapping window so a
@@ -98,11 +104,22 @@ jobs:
           else
             DAYS=7
           fi
-          echo "Looking back $DAYS day(s)"
+          EXTRA=""
+          if [ -n "$RESEND_DATE" ]; then
+            # Re-send a past digest: validate the date, then use the scheduled
+            # run's 7-day window so every paper from that run is back in range.
+            if ! [[ "$RESEND_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "ERROR: resend_date must be YYYY-MM-DD, got '$RESEND_DATE'"
+              exit 1
+            fi
+            DAYS=7
+            EXTRA="--resend $RESEND_DATE"
+          fi
+          echo "Looking back $DAYS day(s) $EXTRA"
           # Capture the exit code so the failure handler can name the real
           # cause: 3 = never reached arXiv, 2 = fetched but email failed.
           set +e
-          python -u tools/arxiv_digest.py --days $DAYS --max-results 1000 --smart-weekend --require-email
+          python -u tools/arxiv_digest.py --days $DAYS --max-results 1000 --smart-weekend --require-email $EXTRA
           rc=$?
           set -e
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
