@@ -311,6 +311,14 @@ def main(argv=None):
         "Defaults to digest.sendWhenEmpty.",
     )
     parser.add_argument(
+        "--resend",
+        metavar="YYYY-MM-DD",
+        default=None,
+        help="Re-send the digest that went out on this date: keep only papers "
+        "recorded as emailed that day, skip normal dedup, and leave the sent "
+        "state untouched. Needs the dedup state (data/digest_state.json).",
+    )
+    parser.add_argument(
         "--require-email",
         action="store_true",
         help=f"Exit {EXIT_EMAIL_FAILED} if email fails (for CI use). "
@@ -344,8 +352,8 @@ def main(argv=None):
         if note:
             print(f"  [!] {note}")
 
-    digest_date = datetime.now().strftime("%Y-%m-%d")
-    print(f"SCQ arXiv Digest - {digest_date}")
+    digest_date = args.resend or datetime.now().strftime("%Y-%m-%d")
+    print(f"SCQ arXiv Digest - {digest_date}" + (" (resend)" if args.resend else ""))
     print(f"  Categories: {', '.join(categories)}")
     print(f"  Looking back: {days_back} day(s)")
     if max_papers:
@@ -388,6 +396,13 @@ def main(argv=None):
             sys.exit(EXIT_FETCH_FAILED)
 
     fetched_count = len(papers)
+    # A blank title is shown as the arXiv id in the digest, but it means the
+    # feed entry parsed badly; leave a trail in the run log so it can be traced.
+    untitled = [p["id"] for p in papers if not (p.get("title") or "").strip()]
+    if untitled:
+        print(
+            f"  Warning: {len(untitled)} paper(s) came back with no title: {', '.join(untitled[:10])}"
+        )
     if papers:
         print(f"\nRanking {len(papers)} papers...")
         papers = rank_papers(papers)
@@ -402,19 +417,33 @@ def main(argv=None):
     if not args.test:
         sent_ids = _state.load_sent_ids()
         before_dedup = len(papers)
-        papers = _state.filter_unsent(papers, sent_ids)
-        deduped_count = before_dedup - len(papers)
-        if before_dedup != len(papers):
-            print(
-                f"  Dedup dropped {before_dedup - len(papers)} paper(s) "
-                f"already emailed in a previous run"
-            )
+        if args.resend:
+            papers = _state.filter_sent_on(papers, sent_ids, args.resend)
+            print(f"  Resend: {len(papers)} paper(s) were emailed on {args.resend}")
+        else:
+            papers = _state.filter_unsent(papers, sent_ids)
+            deduped_count = before_dedup - len(papers)
+            if before_dedup != len(papers):
+                print(
+                    f"  Dedup dropped {before_dedup - len(papers)} paper(s) "
+                    f"already emailed in a previous run"
+                )
 
     # Apply digest filters (plan #6) — config-driven floor + cap.
     pre_filter = len(papers)
     papers = _apply_digest_filters(papers, min_score=min_score, max_count=max_papers)
     if pre_filter != len(papers):
         print(f"  Filters dropped {pre_filter - len(papers)} of {pre_filter} ranked papers")
+
+    if args.resend and not papers:
+        # A resend that finds nothing must not fall through to the empty-run
+        # "no new papers" note: that would tell recipients the day was quiet.
+        print(
+            f"ERROR: no papers recorded as sent on {args.resend} were found in this "
+            "fetch window (is the dedup state restored, and --days wide enough?)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     relevant = sum(1 for p in papers if p.get("relevance_score", 0) >= 5)
     print(f"  {relevant} papers match SCQ keywords")
@@ -460,7 +489,7 @@ def main(argv=None):
             # Record sent IDs only after a confirmed send, so a delivery
             # failure leaves the papers eligible for the next run. An empty
             # run has nothing to record.
-            if papers and not args.test:
+            if papers and not args.test and not args.resend:
                 _state.record_sent(papers, sent_ids, date_str=digest_date)
                 _state.prune(sent_ids)
                 state_file = _state.save_sent_ids(sent_ids)

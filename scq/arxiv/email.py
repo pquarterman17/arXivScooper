@@ -25,7 +25,9 @@ import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape as _esc
 
+from scq.arxiv.common import display_title
 from scq.arxiv.search import ARXIV_CATEGORIES
 
 # Email config.
@@ -230,20 +232,27 @@ def send_email_digest(papers, digest_date, frequency="daily", context=None):
         score = p["relevance_score"]
         color = "#2e7d32" if score >= 20 else ("#f57f17" if score >= 10 else "#757575")
         star_icon = "&#9733; " if score >= 20 else ""
-        keywords = ", ".join(p["matched_keywords"][:4])
+        # Titles, author lists and keywords come straight from arXiv and can
+        # hold "<" or "&" (e.g. "<Tc" or "R&D"); unescaped, a "<" followed by a
+        # letter is parsed as a tag and swallows the rest of the row.
+        title = _esc(display_title(p))
+        authors = _esc(p["short_authors"])
+        abs_url = _esc(p["abs_url"], quote=True)
+        pdf_url = _esc(p["pdf_url"], quote=True)
+        keywords = _esc(", ".join(p["matched_keywords"][:4]))
         body_html += f"""
   <div style="margin: 16px 0; padding: 12px; border-left: 3px solid {color}; background: #f8f9fa;">
     <div style="font-weight: 600; margin-bottom: 4px;">
-      {star_icon}<a href="{p["abs_url"]}" style="color: #1a73e8; text-decoration: none;">{p["title"]}</a>
+      {star_icon}<a href="{abs_url}" style="color: #1a73e8; text-decoration: none;">{title}</a>
       <span style="color: {color}; font-size: 12px; font-weight: 700;">[{score}]</span>
     </div>
     <div style="font-size: 13px; color: #666; margin-bottom: 4px;">
-      {p["short_authors"]} &middot; {p["published"][:10]}
+      {authors} &middot; {p["published"][:10]}
     </div>
     <div style="font-size: 12px; color: #888; margin-bottom: 6px;">Keywords: {keywords}</div>
     <div style="font-size: 12px;">
-      <a href="{p["abs_url"]}" style="color: #1a73e8; margin-right: 12px;">Abstract</a>
-      <a href="{p["pdf_url"]}" style="color: #1a73e8; margin-right: 12px;">PDF</a>
+      <a href="{abs_url}" style="color: #1a73e8; margin-right: 12px;">Abstract</a>
+      <a href="{pdf_url}" style="color: #1a73e8; margin-right: 12px;">PDF</a>
     </div>
   </div>
 """
@@ -266,7 +275,7 @@ def send_email_digest(papers, digest_date, frequency="daily", context=None):
     plain += f"{len(papers)} papers, {len(top_papers)} relevant\n\n"
     for p in top_papers:
         star = "★ " if p["relevance_score"] >= 20 else ""
-        plain += f"{star}[{p['relevance_score']}] {p['title']}\n"
+        plain += f"{star}[{p['relevance_score']}] {display_title(p)}\n"
         plain += f"    {p['short_authors']} — {p['abs_url']}\n\n"
     plain += f"\nOpen digests/digest_{digest_date}.html to triage papers.\n"
 

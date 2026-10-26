@@ -34,17 +34,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from xml.etree import ElementTree as ET
 
-
-class ArxivFetchError(RuntimeError):
-    """Raised when no arXiv response could be obtained at all.
-
-    Distinguishes a *fetch failure* (rate-limit, timeout, 5xx, or the
-    wall-clock budget being exhausted before any page was retrieved) from
-    a *genuinely empty result* (arXiv answered, but nothing matched the
-    date window). Both used to collapse into an empty list, which let the
-    digest mail a misleading "no papers" email on a transient outage.
-    """
-
+from scq.arxiv.common import ArxivFetchError, _make_short_authors
 
 # ─── Configuration ───
 
@@ -657,7 +647,7 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
             from scq.arxiv.rss import fetch_rss_papers
 
             with _reserve_budget(_FALLBACK_BUDGET):
-                rss_papers = fetch_rss_papers(categories, days_back=days_back)
+                rss_papers = fetch_rss_papers(categories, fetcher=_arxiv_get, days_back=days_back)
         except ArxivFetchError as e:
             print(f"  RSS fallback unreachable: {e}")
         except Exception as e:  # noqa: BLE001 — fallback must not mask the real error
@@ -746,17 +736,6 @@ def fetch_arxiv_papers(categories, days_back=1, max_results=200):
         print(f"  {cat}: {n} papers")
 
     return papers
-
-
-def _make_short_authors(authors):
-    """Generate 'First et al.' or 'First & Second' style short author string."""
-    if len(authors) == 0:
-        return "Unknown"
-    if len(authors) == 1:
-        return authors[0].split()[-1]
-    if len(authors) == 2:
-        return f"{authors[0].split()[-1]} & {authors[1].split()[-1]}"
-    return f"{authors[0].split()[-1]} et al."
 
 
 # ─── Relevance Scoring ───
